@@ -1,0 +1,183 @@
+You are GitHub Copilot assisting to build a maintainable prototype of a "Kahoot-like" quiz system for math questions.
+
+### Goal
+
+Create a **prototype Python application** using **Qt6** for the teacher UI and an embedded **HTTP API server** so students can answer from their phones over the local network (no public domain needed). The prototype should be clean, type-safe where possible, and use a clear folder structure that separates UI, business logic, constants, and server code.
+
+The main scenario:
+
+- Teacher runs a Qt6 desktop app.
+- The Qt6 app starts an HTTP API server (e.g. FastAPI or Flask) on `0.0.0.0:8000`.
+- Students open a browser at `http://<teacher-ip>:8000/` on the same network.
+- Students see the current question and submit their answers via a simple web page.
+- The teacher sees the current question and incoming answers in the Qt UI.
+
+### Technical requirements
+
+1. **Python and Qt**
+
+   - Use Python 3.11+.
+   - Use Qt6 through **PySide6** or **PyQt6** (prefer PySide6 if you have no strong preference).
+   - Use type hints everywhere practical (PEP 484).
+   - Use dataclasses for simple data containers where appropriate.
+   - Follow standard Python naming conventions:
+     - `snake_case` for variables, functions, and module names.
+     - `PascalCase` for classes.
+     - `UPPER_SNAKE_CASE` for constants.
+   - Use **full, descriptive variable names**, not abbreviations (e.g. `current_question_text` instead of `q`).
+
+2. **HTTP API server**
+
+   - Prefer **FastAPI + uvicorn** for the student-facing API.
+   - Run the API server in a background thread started from the Qt application.
+   - Bind to `host="0.0.0.0"` and a configurable `PORT` constant (e.g. 8000).
+   - Provide at least these endpoints:
+     - `GET /` → returns a simple HTML page for students (contains JavaScript to poll for questions and send answers).
+     - `GET /question` → returns JSON with information about the current question:
+       - `active: bool`
+       - `question_text: str | None`
+     - `POST /answer` → accepts a JSON body `{ "answer_text": "<student answer>" }` and appends it to an in-memory list of answers if a question is active.
+
+3. **Business logic**
+
+   - Create a small **domain model** for quiz logic in a dedicated module.
+   - Use a dataclass `Question` with fields like:
+     - `id: int`
+     - `question_text: str` (this can contain LaTeX for math)
+     - `is_active: bool`
+   - Use a dataclass `SubmittedAnswer` with fields like:
+     - `question_id: int`
+     - `answer_text: str`
+     - `submitted_at: datetime.datetime`
+   - Create a `QuizManager` class that:
+     - Maintains the current question (or `None` if no active question).
+     - Stores a list of submitted answers for the current question.
+     - Has methods such as:
+       - `set_current_question(question_text: str) -> Question`
+       - `stop_current_question() -> None`
+       - `add_answer(answer_text: str) -> SubmittedAnswer`
+       - `get_current_question() -> Question | None`
+       - `get_answers_for_current_question() -> list[SubmittedAnswer]`
+
+4. **Qt UI (teacher app)**
+
+   - Implement a `TeacherMainWindow` class that:
+     - Inherits from the appropriate Qt main window class.
+     - Contains:
+       - A text area for the teacher to write or paste a question (plain text or LaTeX).
+       - A button to start the question.
+       - A button to stop the question.
+       - A read-only label showing the current active question text.
+       - A list widget that shows incoming answers as they arrive.
+       - A label or text area that clearly shows the URL for students, e.g. `http://192.168.1.37:8000/` (use a placeholder text that will later be replaced with the detected local IP address).
+     - When the teacher presses "Start question":
+       - The text from the question editor is passed to `QuizManager.set_current_question`.
+       - Any previous answers are cleared for the new question.
+     - When the teacher presses "Stop question":
+       - Call `QuizManager.stop_current_question`.
+   - Periodically refresh the answer list from the shared state (for example using a `QTimer` that polls the `QuizManager` every second).
+   - Do **not** block the Qt event loop when interacting with the server or business logic.
+
+5. **Student web page**
+
+   - The `GET /` endpoint should return a very simple HTML page with:
+     - A heading showing that this is the quiz page.
+     - A `<div>` to display the current question text.
+     - A text input and a submit button for the student answer.
+     - A simple `<p>` element to show status messages like "Answer sent".
+   - Include a small JavaScript snippet that:
+     - Periodically fetches `/question` (e.g. every 2 seconds).
+     - Updates the displayed question text.
+     - Sends the answer via `POST /answer` when the form is submitted.
+   - Keep it minimal and framework-free (plain HTML + vanilla JavaScript).
+   - Prepare the HTML so that LaTeX can later be rendered via MathJax, but it is enough for the prototype to just display raw LaTeX text.
+
+6. **State sharing between Qt and API**
+
+   - Use a clean mechanism to share state between the FastAPI endpoints and the `QuizManager` used in the Qt UI.
+   - For the prototype, a simple approach is acceptable (e.g. a module-level `QuizManager` instance that is imported both by the API module and the Qt application).
+   - Make sure access to shared data is reasonably safe even with multiple threads (for example by:
+     - Using locks around operations that modify shared lists; or
+     - Keeping operations simple and atomic for the prototype).
+
+7. **Project structure**
+
+   - Use the following folder layout inside the repository root:
+
+     - `pyproject.toml` OR `requirements.txt` (your choice) with dependencies:
+       - `pyside6` (or `pyqt6`)
+       - `fastapi`
+       - `uvicorn`
+       - Any additional small libraries you decide are necessary.
+     - `app_main.py` (entry point that starts Qt and the API server).
+
+     - `quiz_app/`
+       - `__init__.py`
+
+       - `ui/`
+         - `__init__.py`
+         - `teacher_main_window.py`  
+           (contains the `TeacherMainWindow` implementation)
+
+       - `server/`
+         - `__init__.py`
+         - `api_server.py`  
+           (contains the FastAPI app, endpoint definitions, and function to start the server in a background thread)
+
+       - `core/`
+         - `__init__.py`
+         - `models.py`  
+           (contains `Question`, `SubmittedAnswer`, and any other domain model dataclasses)
+         - `quiz_manager.py`  
+           (contains `QuizManager`)
+
+       - `constants/`
+         - `__init__.py`
+         - `network_constants.py`  
+           (e.g. `DEFAULT_HOST`, `DEFAULT_PORT`)
+         - `ui_constants.py`  
+           (e.g. window titles, default texts, refresh intervals)
+         - other dedicated constants modules if needed later.
+
+       - `utils/`
+         - `__init__.py`
+         - `logging_config.py`  
+           (optional: configure a basic logging setup)
+
+8. **Entry point**
+
+   - In `app_main.py`:
+     - Configure logging.
+     - Import and instantiate a global `QuizManager`.
+     - Start the FastAPI server in a background daemon thread.
+     - Create a `QApplication`, instantiate `TeacherMainWindow` (passing in the `QuizManager`), and start the Qt event loop.
+   - Keep the `if __name__ == "__main__":` guard.
+
+9. **Code quality and comments**
+
+   - Use clear, descriptive function and method names.
+   - Add short but meaningful docstrings to public classes and functions.
+   - Add type hints to function/method parameters and return values.
+   - Keep functions small and focused. Avoid putting all logic into one file or one giant class.
+   - Use consistent formatting (PEP 8).
+
+### What to generate
+
+1. The folder and file structure outlined above.
+2. Minimal, but working implementations of:
+   - `app_main.py`
+   - `quiz_app/core/models.py`
+   - `quiz_app/core/quiz_manager.py`
+   - `quiz_app/server/api_server.py`
+   - `quiz_app/ui/teacher_main_window.py`
+   - `quiz_app/constants/network_constants.py`
+   - `quiz_app/constants/ui_constants.py`
+3. The basic HTML and JavaScript returned by `GET /` in the FastAPI server.
+
+Focus on clarity and maintainability over cleverness. The prototype does not need advanced features like authentication, scoring, or persistence; it only needs to support:
+
+- Setting a question in the Qt app.
+- Students seeing the question and submitting answers from their browser.
+- The teacher seeing incoming answers in the Qt UI.
+
+Start by scaffolding the project structure and then fill in the key files with working example code that can be run locally.
