@@ -1,0 +1,87 @@
+Q: What is $30^o$ in radians?
+A: $\frac{\pi}{2}$
+B: $\frac{\pi}{6}$
+C: $\frac{\pi}{2}$
+D: $\frac{\pi}{3}$
+CORRECT: B
+
+---
+
+Q: What is $45^o$ in radians?
+A: $\frac{\pi}{3}$
+B: $\frac{\pi}{6}$
+C: $\frac{\pi}{4}$
+D: $\frac{3\pi}{4}$
+CORRECT: C
+
+---
+
+Q: What is $60^o$ in radians?
+A: $\frac{\pi}{6}$
+B: $\frac{\pi}{3}$
+C: $\frac{\pi}{2}$
+D: $\pi$
+CORRECT: B
+
+---
+
+Q: What is $90^o$ in radians?
+A: $\frac{\pi}{4}$
+B: $\frac{3\pi}{4}$
+C: $\pi$
+D: $\frac{\pi}{2}$
+CORRECT: D
+
+---
+
+Q: What is $120^o$ in radians?
+A: $\frac{2\pi}{3}$
+B: $\frac{\pi}{3}$
+C: $\pi$
+D: $\frac{3\pi}{2}$
+CORRECT: A
+
+---
+
+Q: What is $135^o$ in radians?
+A: $\frac{\pi}{4}$
+B: $\frac{3\pi}{4}$
+C: $\frac{5\pi}{4}$
+D: $\frac{7\pi}{4}$
+CORRECT: B
+
+---
+
+Q: What is $150^o$ in radians?
+A: $\frac{5\pi}{6}$
+B: $\frac{\pi}{2}$
+C: $\frac{\pi}{4}$
+D: $\frac{7\pi}{6}$
+CORRECT: A
+
+---
+
+Q: What is $180^o$ in radians?
+A: $\pi$
+B: $\frac{\pi}{2}$
+C: $2\pi$
+D: $\frac{3\pi}{2}$
+CORRECT: A
+
+---
+
+Q: What is $210^o$ in radians?
+A: $\frac{5\pi}{6}$
+B: $\frac{7\pi}{6}$
+C: $\frac{11\pi}{6}$
+D: $2\pi$
+CORRECT: B
+
+---
+
+Q: What is $360^o$ in radians?
+A: $2\pi$
+B: $\pi$
+C: $\frac{\pi}{2}$
+D: $\frac{3\pi}{2}$
+CORRECT: A
