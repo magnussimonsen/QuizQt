@@ -25,8 +25,19 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
+from quiz_app.constants.about import (
+    APP_ABOUT_TEXT,
+    APP_AUTHOR,
+    APP_AI,
+    APP_LICENSE,
+    APP_NAME,
+    APP_REPOSITORY_URL,
+    APP_VERSION,
+)
 from quiz_app.constants.ui_constants import (
     ANSWER_REFRESH_INTERVAL_MS,
+    EXPORT_DIALOG_TITLE,
+    EXPORT_FILE_FILTER,
     IMPORT_BUTTON_TEXT,
     IMPORT_DIALOG_TITLE,
     IMPORT_FILE_FILTER,
@@ -39,6 +50,7 @@ from quiz_app.constants.ui_constants import (
     MODE3_SHOW_CORRECT,
     MODE_BUTTON_EDIT,
     MODE_BUTTON_IMPORT,
+    MODE_BUTTON_SAVE_FILE,
     MODE_BUTTON_MAKE,
     MODE_BUTTON_START,
     MODE_BUTTON_STOP,
@@ -50,6 +62,7 @@ from quiz_app.constants.ui_constants import (
     WINDOW_TITLE,
 )
 from quiz_app.core.models import QuizQuestion
+from quiz_app.core.quiz_exporter import save_quiz_to_file
 from quiz_app.core.quiz_importer import QuizImportError, load_quiz_from_file
 from quiz_app.core.quiz_manager import QuizManager
 from quiz_app.ui.dialog_helpers import (
@@ -102,6 +115,7 @@ class TeacherMainWindow(QMainWindow):
         self._reset_aliases_on_new_quiz: bool = False
         self._scoreboard_size: int = 3
         self._repeat_until_all_correct: bool = False
+        self._last_export_path: Path | None = None
 
         self._build_ui()
         self._configure_refresh_timer()
@@ -139,6 +153,10 @@ class TeacherMainWindow(QMainWindow):
         self.make_mode_button.clicked.connect(self._handle_make_new_quiz)  # type: ignore[arg-type]
         button_row.addWidget(self.make_mode_button)
 
+        self.save_quiz_button = QPushButton(MODE_BUTTON_SAVE_FILE, self)
+        self.save_quiz_button.clicked.connect(self._handle_save_quiz_to_file)  # type: ignore[arg-type]
+        button_row.addWidget(self.save_quiz_button)
+
         self.import_mode_button = QPushButton(MODE_BUTTON_IMPORT, self)
         self.import_mode_button.clicked.connect(self._handle_import_quiz)  # type: ignore[arg-type]
         button_row.addWidget(self.import_mode_button)
@@ -152,6 +170,10 @@ class TeacherMainWindow(QMainWindow):
         self.start_mode_button.clicked.connect(self._handle_start_mode_button)  # type: ignore[arg-type]
         button_row.addWidget(self.start_mode_button)
         
+        self.about_button = QPushButton("About QuizQt", self)
+        self.about_button.clicked.connect(self._handle_about)  # type: ignore[arg-type]
+        button_row.addWidget(self.about_button)
+
         self.settings_button = QPushButton("Settings", self)
         self.settings_button.clicked.connect(self._handle_settings)  # type: ignore[arg-type]
         button_row.addWidget(self.settings_button)
@@ -593,6 +615,34 @@ class TeacherMainWindow(QMainWindow):
             f"Successfully imported {len(imported.questions)} questions. You can now edit or start the quiz."
         )
 
+    def _handle_save_quiz_to_file(self) -> None:
+        """Export the current quiz to a text file compatible with the importer."""
+        if not self.quiz_manager.has_loaded_quiz():
+            show_warning(self, "No quiz", NO_QUIZ_LOADED_MESSAGE)
+            return
+
+        if not self._check_unsaved_changes():
+            return
+
+        default_path = self._last_export_path or (Path.cwd() / "quiz_export.txt")
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            EXPORT_DIALOG_TITLE,
+            str(default_path),
+            EXPORT_FILE_FILTER,
+        )
+        if not file_path:
+            return
+
+        try:
+            save_quiz_to_file(Path(file_path), self.quiz_manager.get_loaded_questions())
+        except (OSError, ValueError) as exc:
+            show_error(self, "Export failed", str(exc))
+            return
+
+        self._last_export_path = Path(file_path)
+        show_info(self, "Quiz saved", f"Quiz exported to {file_path}.")
+
     # ------------------------------------------------------------------
     # Mode 3 – live delivery
     # ------------------------------------------------------------------
@@ -607,11 +657,11 @@ class TeacherMainWindow(QMainWindow):
             self.quiz_manager.reset_student_aliases()
             self._update_scoreboard_view()
 
+        self.quiz_manager.reset_quiz_progress()
         question = self.quiz_manager.move_to_next_question()
         if question is None:
             show_info(self, "Quiz complete", QUIZ_COMPLETE_MESSAGE)
             self.start_mode_button.setChecked(False)
-            self._update_questions_remaining_label()
             self._set_mode(TeacherMode.QUIZ_CREATION)
             return
 
@@ -625,11 +675,14 @@ class TeacherMainWindow(QMainWindow):
 
     def _stop_live_session(self) -> None:
         self.quiz_manager.stop_current_question()
+        self.quiz_manager.reset_quiz_progress()
         self._live_session_active = False
         self.start_mode_button.setText(MODE_BUTTON_START)
         self.start_mode_button.setChecked(False)
         self.live_toggle_button.setEnabled(False)
         self.live_correct_label.setVisible(False)
+        if hasattr(self, "answers_received_label"):
+            self.answers_received_label.setText("Answers received: 0")
         self._set_mode(TeacherMode.QUIZ_CREATION)
 
     def _handle_live_toggle(self) -> None:
@@ -675,13 +728,16 @@ class TeacherMainWindow(QMainWindow):
 
     def _update_live_stats(self) -> None:
         counts = self.quiz_manager.get_option_counts()
-        total = sum(counts) or 1
+        answer_total = sum(counts)
+        divisor = answer_total or 1
         for idx, label in enumerate(self.option_stat_labels):
-            percentage = (counts[idx] / total) * 100
+            percentage = (counts[idx] / divisor) * 100
             label.setText(f"{chr(ord('A') + idx)}: {percentage:.0f}%")
 
         overall = self.quiz_manager.get_overall_correctness_percentage()
         self.overall_stat_label.setText(f"Overall correctness: {overall:.0f}%")
+        if hasattr(self, "answers_received_label"):
+            self.answers_received_label.setText(f"Answers received: {answer_total}")
         self._update_scoreboard_view()
 
     def _rebuild_scoreboard_labels(self) -> None:
@@ -700,6 +756,10 @@ class TeacherMainWindow(QMainWindow):
             label.setAlignment(Qt.AlignLeft)
             self.scoreboard_layout.addWidget(label)
             self.scoreboard_labels.append(label)
+
+        self.answers_received_label = QLabel("Answers received: 0", self)
+        self.answers_received_label.setAlignment(Qt.AlignLeft)
+        self.scoreboard_layout.addWidget(self.answers_received_label)
 
         self.scoreboard_layout.addStretch()
         self._update_scoreboard_group_title()
@@ -726,6 +786,8 @@ class TeacherMainWindow(QMainWindow):
         label_style = f"font-size: {self._game_font_size}pt;"
         for label in self.scoreboard_labels:
             label.setStyleSheet(label_style)
+        if hasattr(self, "answers_received_label"):
+            self.answers_received_label.setStyleSheet(label_style)
 
     # ------------------------------------------------------------------
     # Auto-load default quiz
@@ -756,6 +818,18 @@ class TeacherMainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Settings
     # ------------------------------------------------------------------
+    def _handle_about(self) -> None:
+        """Display application metadata in a dialog."""
+        details = (
+            f"{APP_NAME} v{APP_VERSION}\n"
+            f"Author: {APP_AUTHOR}\n"
+            f"AI Assistant: {APP_AI}\n"
+            f"License: {APP_LICENSE}\n\n"
+            f"{APP_ABOUT_TEXT}\n\n"
+            f"Repository: {APP_REPOSITORY_URL}"
+        )
+        show_info(self, f"About {APP_NAME}", details)
+
     def _handle_settings(self) -> None:
         """Open settings dialog and apply changes."""
         dialog = SettingsDialog(
@@ -812,8 +886,10 @@ class TeacherMainWindow(QMainWindow):
         for button in [
             self.make_mode_button,
             self.import_mode_button,
+            self.save_quiz_button,
             self.edit_mode_button,
             self.start_mode_button,
+            self.about_button,
             self.settings_button,
             self.creation_insert_button,
             self.creation_save_button,

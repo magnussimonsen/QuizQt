@@ -7,6 +7,7 @@ ANSWER_REFRESH_INTERVAL_MS: int = 1000
 
 MODE_BUTTON_MAKE: str = "Make New Quiz"
 MODE_BUTTON_IMPORT: str = "Import Quiz"
+MODE_BUTTON_SAVE_FILE: str = "Save Quiz to File"
 MODE_BUTTON_EDIT: str = "Edit Quiz"
 MODE_BUTTON_START: str = "Start Quiz"
 MODE_BUTTON_STOP: str = "Stop Quiz"
@@ -20,6 +21,8 @@ MODE1_NEXT_BUTTON: str = "Show Next Question"
 IMPORT_BUTTON_TEXT: str = "Select quiz file"
 IMPORT_DIALOG_TITLE: str = "Select quiz file"
 IMPORT_FILE_FILTER: str = "Quiz files (*.txt);;All files (*.*)"
+EXPORT_DIALOG_TITLE: str = "Save quiz to file"
+EXPORT_FILE_FILTER: str = "Quiz files (*.txt);;All files (*.*)"
 
 MODE3_SHOW_CORRECT: str = "Show Correct Answer"
 MODE3_NEXT_QUESTION: str = "Next Question"

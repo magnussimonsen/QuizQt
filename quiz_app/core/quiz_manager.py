@@ -211,6 +211,18 @@ class QuizManager:
             self._current_question_aliases.clear()
             self._alias_generation = 0
 
+    def reset_quiz_progress(self) -> None:
+        """Reset live progression so the next session starts from the first question."""
+        with self._lock:
+            self._quiz_position = -1
+            self._current_question = None
+            self._question_active = False
+            self._answers = []
+            self._overall_answer_history = []
+            self._current_question_aliases.clear()
+            for question in self._loaded_quiz:
+                question.all_students_answered_correctly = False
+
     def add_question(self, question: QuizQuestion) -> None:
         """Add a new question to the end of the quiz."""
         with self._lock:
