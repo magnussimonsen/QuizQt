@@ -45,8 +45,14 @@ class MarkdownMathRenderer:
             return "<p><em>No content provided.</em></p>"
         return self._markdown.render(sanitized)
 
-    def wrap_with_mathjax(self, body_html: str, title: str = "QuizQt") -> str:
-        """Wrap a fragment inside a minimal HTML document that loads MathJax."""
+    def wrap_with_mathjax(self, body_html: str, title: str = "QuizQt", font_size: int = 14) -> str:
+        """Wrap a fragment inside a minimal HTML document that loads MathJax.
+        
+        Args:
+            body_html: The HTML content to wrap
+            title: Document title
+            font_size: Font size in points for the question text
+        """
 
         return f"""<!doctype html>
 <html lang=\"en\">
@@ -55,8 +61,8 @@ class MarkdownMathRenderer:
     <title>{title}</title>
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
     <style>
-      body {{ font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 1rem; background: transparent; color: #f5f7ff; }}
-      .question-html {{ font-size: 1.1rem; line-height: 1.5; }}
+      body {{ font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 1rem; background: transparent; color: #000000; font-size: {font_size}pt; }}
+      .question-html {{ line-height: 1.5; }}
     </style>
     <script>
       window.MathJax = {{ tex: {{ inlineMath: [['$','$']], displayMath: [['$$','$$']] }}, svg: {{ fontCache: 'global' }} }};
@@ -68,11 +74,17 @@ class MarkdownMathRenderer:
   </body>
 </html>"""
 
-    def render_full_document(self, markdown_text: str, title: str = "QuizQt") -> str:
-        """Convenience wrapper to render markdown and embed MathJax."""
+    def render_full_document(self, markdown_text: str, title: str = "QuizQt", font_size: int = 14) -> str:
+        """Convenience wrapper to render markdown and embed MathJax.
+        
+        Args:
+            markdown_text: Markdown text to render
+            title: Document title
+            font_size: Font size in points for the question text
+        """
 
         fragment = self.render_fragment(markdown_text)
-        return self.wrap_with_mathjax(fragment, title=title)
+        return self.wrap_with_mathjax(fragment, title=title, font_size=font_size)
 
 
 renderer = MarkdownMathRenderer()

@@ -7,6 +7,7 @@ ANSWER_REFRESH_INTERVAL_MS: int = 1000
 
 MODE_BUTTON_MAKE: str = "Make New Quiz"
 MODE_BUTTON_IMPORT: str = "Import Quiz"
+MODE_BUTTON_EDIT: str = "Edit Quiz"
 MODE_BUTTON_START: str = "Start Quiz"
 MODE_BUTTON_STOP: str = "Stop Quiz"
 
@@ -15,7 +16,6 @@ MODE1_SAVE_BUTTON: str = "Save Question"
 MODE1_DELETE_BUTTON: str = "Delete Question"
 MODE1_PREV_BUTTON: str = "Show Previous Question"
 MODE1_NEXT_BUTTON: str = "Show Next Question"
-MODE1_SAVE_ALL_BUTTON: str = "Save All Questions"
 
 IMPORT_BUTTON_TEXT: str = "Select quiz file"
 IMPORT_DIALOG_TITLE: str = "Select quiz file"

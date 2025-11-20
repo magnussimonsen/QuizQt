@@ -67,8 +67,12 @@ def _parse_quiz_text(text: str) -> list[QuizQuestion]:
                 blocks.append("\n".join(current_block).strip())
                 current_block = []
             continue
-        if stripped or current_block:
+        if stripped:
             current_block.append(raw_line)
+        elif current_block:
+            # Blank line encountered after content - finalize current block
+            blocks.append("\n".join(current_block).strip())
+            current_block = []
     if current_block:
         blocks.append("\n".join(current_block).strip())
 
@@ -140,6 +144,7 @@ def _parse_block(block: str) -> QuizQuestion:
         question_text=question_text,
         options=option_list,
         correct_option_index=correct_index,
+        is_saved=True,
     )
 
 

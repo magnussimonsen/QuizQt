@@ -14,6 +14,7 @@ class QuizQuestion:
     question_text: str
     options: list[str]
     correct_option_index: int | None = None
+    is_saved: bool = True
 
 
 @dataclass(slots=True)
@@ -23,3 +24,4 @@ class SubmittedAnswer:
     question_id: int
     selected_option_index: int
     submitted_at: datetime
+    display_name: str | None = None
