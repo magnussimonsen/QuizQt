@@ -26,6 +26,7 @@ class SettingsDialog(QDialog):
         show_stats_always: bool = False,
         reset_aliases_on_start: bool = False,
         scoreboard_size: int = 3,
+        repeat_until_all_correct: bool = False,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
@@ -37,6 +38,7 @@ class SettingsDialog(QDialog):
         self._show_stats_always = show_stats_always
         self._reset_aliases_on_start = reset_aliases_on_start
         self._scoreboard_size = max(1, min(10, scoreboard_size))
+        self._repeat_until_all_correct = repeat_until_all_correct
         
         self._build_ui()
     
@@ -94,6 +96,13 @@ class SettingsDialog(QDialog):
         self.reset_aliases_checkbox.setChecked(self._reset_aliases_on_start)
         display_layout.addWidget(self.reset_aliases_checkbox)
 
+        self.repeat_until_all_correct_checkbox = QCheckBox("Repeat questions until everyone answers correctly")
+        self.repeat_until_all_correct_checkbox.setToolTip(
+            "When enabled, live mode will keep cycling through unanswered questions until each student gets them correct."
+        )
+        self.repeat_until_all_correct_checkbox.setChecked(self._repeat_until_all_correct)
+        display_layout.addWidget(self.repeat_until_all_correct_checkbox)
+
         scoreboard_row = QHBoxLayout()
         scoreboard_label = QLabel("Scoreboard slots (top N):")
         scoreboard_label.setToolTip("Number of top students shown in the live view scoreboard.")
@@ -141,3 +150,7 @@ class SettingsDialog(QDialog):
     def get_scoreboard_size(self) -> int:
         """Get desired number of scoreboard slots."""
         return self.scoreboard_spinbox.value()
+
+    def get_repeat_until_all_correct(self) -> bool:
+        """Get whether repeat-until-correct mode is enabled."""
+        return self.repeat_until_all_correct_checkbox.isChecked()

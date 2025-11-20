@@ -15,6 +15,7 @@ class QuizQuestion:
     options: list[str]
     correct_option_index: int | None = None
     is_saved: bool = True
+    all_students_answered_correctly: bool = False
 
 
 @dataclass(slots=True)

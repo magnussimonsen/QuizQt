@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+import random
 from threading import Lock
 
 from .models import QuizQuestion, SubmittedAnswer
@@ -43,6 +44,8 @@ class QuizManager:
         self._scoreboard: dict[str, ScoreEntry] = {}
         self._current_question_aliases: set[str] = set()
         self._alias_generation: int = 0
+        self._repeat_until_all_correct: bool = False
+        self._rng = random.Random()
 
     def load_quiz_from_questions(self, questions: list[QuizQuestion]) -> None:
         """Replace the current quiz with a new ordered list of questions."""
@@ -60,6 +63,11 @@ class QuizManager:
             self._overall_answer_history = []
             self._scoreboard.clear()
             self._current_question_aliases.clear()
+
+    def set_repeat_until_all_correct(self, enabled: bool) -> None:
+        """Toggle repeat-mode behavior for question selection."""
+        with self._lock:
+            self._repeat_until_all_correct = enabled
 
     def set_manual_question(
         self,
@@ -96,20 +104,16 @@ class QuizManager:
         with self._lock:
             if not self._loaded_quiz:
                 raise RuntimeError("No quiz has been imported yet.")
-            next_index = self._quiz_position + 1
-            if next_index >= len(self._loaded_quiz):
-                return None
-            self._quiz_position = next_index
-            self._current_question = self._loaded_quiz[next_index]
-            self._question_active = True
-            self._answers = []
-            self._current_question_aliases.clear()
-            return self._current_question
+            if self._repeat_until_all_correct:
+                return self._select_unmastered_question()
+            return self._advance_linear_question()
 
     def stop_current_question(self) -> None:
         """Stop accepting answers for the active question."""
         with self._lock:
             self._question_active = False
+            if self._repeat_until_all_correct:
+                self._update_mastery_for_current_question()
 
     def record_selected_option(
         self,
@@ -157,7 +161,19 @@ class QuizManager:
 
     def has_more_quiz_questions(self) -> bool:
         with self._lock:
-            return bool(self._loaded_quiz) and (self._quiz_position + 1) < len(self._loaded_quiz)
+            if not self._loaded_quiz:
+                return False
+            if self._repeat_until_all_correct:
+                return any(not question.all_students_answered_correctly for question in self._loaded_quiz)
+            return (self._quiz_position + 1) < len(self._loaded_quiz)
+
+    def get_remaining_question_count(self) -> int:
+        with self._lock:
+            if not self._loaded_quiz:
+                return 0
+            if self._repeat_until_all_correct:
+                return sum(1 for question in self._loaded_quiz if not question.all_students_answered_correctly)
+            return max(0, len(self._loaded_quiz) - (self._quiz_position + 1))
 
     def has_loaded_quiz(self) -> bool:
         with self._lock:
@@ -295,6 +311,47 @@ class QuizManager:
         if is_correct:
             entry.correct_answers += 1
         entry.last_updated = datetime.utcnow()
+
+    def _advance_linear_question(self) -> QuizQuestion | None:
+        next_index = self._quiz_position + 1
+        if next_index >= len(self._loaded_quiz):
+            return None
+        self._quiz_position = next_index
+        self._current_question = self._loaded_quiz[next_index]
+        self._question_active = True
+        self._answers = []
+        self._current_question_aliases.clear()
+        return self._current_question
+
+    def _select_unmastered_question(self) -> QuizQuestion | None:
+        candidates = [idx for idx, question in enumerate(self._loaded_quiz) if not question.all_students_answered_correctly]
+        if not candidates:
+            self._current_question = None
+            self._question_active = False
+            return None
+        next_index = self._rng.choice(candidates)
+        self._quiz_position = next_index
+        self._current_question = self._loaded_quiz[next_index]
+        self._question_active = True
+        self._answers = []
+        self._current_question_aliases.clear()
+        return self._current_question
+
+    def _update_mastery_for_current_question(self) -> None:
+        if self._current_question is None:
+            return
+        if self._quiz_position < 0 or self._quiz_position >= len(self._loaded_quiz):
+            return
+        question = self._loaded_quiz[self._quiz_position]
+        if question.correct_option_index is None:
+            question.all_students_answered_correctly = True
+            return
+        if not self._answers:
+            question.all_students_answered_correctly = False
+            return
+        question.all_students_answered_correctly = all(
+            answer.selected_option_index == question.correct_option_index for answer in self._answers
+        )
 
     def _prepare_question(self, question: QuizQuestion) -> QuizQuestion:
         options = self._validate_options(question.options)

@@ -101,6 +101,7 @@ class TeacherMainWindow(QMainWindow):
         self._show_stats_always: bool = False
         self._reset_aliases_on_new_quiz: bool = False
         self._scoreboard_size: int = 3
+        self._repeat_until_all_correct: bool = False
 
         self._build_ui()
         self._configure_refresh_timer()
@@ -610,6 +611,7 @@ class TeacherMainWindow(QMainWindow):
         if question is None:
             show_info(self, "Quiz complete", QUIZ_COMPLETE_MESSAGE)
             self.start_mode_button.setChecked(False)
+            self._update_questions_remaining_label()
             self._set_mode(TeacherMode.QUIZ_CREATION)
             return
 
@@ -617,7 +619,7 @@ class TeacherMainWindow(QMainWindow):
         self.start_mode_button.setText(MODE_BUTTON_STOP)
         self.live_toggle_button.setEnabled(True)
         self._live_action = LiveAction.SHOW_CORRECT
-        self.live_toggle_button.setText(MODE3_SHOW_CORRECT)
+        self._update_next_question_button_label()
         self._hide_stats()  # Hide all stats when starting question
         self._display_live_question(question)
 
@@ -644,7 +646,7 @@ class TeacherMainWindow(QMainWindow):
             self.live_correct_label.setVisible(True)
             self._show_stats()  # Show all stats after showing correct answer
             self._live_action = LiveAction.LOAD_NEXT
-            self.live_toggle_button.setText(MODE3_NEXT_QUESTION)
+            self._update_next_question_button_label()
         else:
             question = self.quiz_manager.move_to_next_question()
             if question is None:
@@ -654,7 +656,7 @@ class TeacherMainWindow(QMainWindow):
             self.live_correct_label.setVisible(False)
             self._hide_stats()  # Hide all stats when loading next question
             self._live_action = LiveAction.SHOW_CORRECT
-            self.live_toggle_button.setText(MODE3_SHOW_CORRECT)
+            self._update_next_question_button_label()
             self._display_live_question(question)
 
     def _display_live_question(self, question: QuizQuestion) -> None:
@@ -716,7 +718,7 @@ class TeacherMainWindow(QMainWindow):
 
     def _update_scoreboard_group_title(self) -> None:
         if hasattr(self, "scoreboard_group"):
-            self.scoreboard_group.setTitle(f"Top {self._scoreboard_size} Students")
+            self.scoreboard_group.setTitle(f"Top {self._scoreboard_size}") # Top N Students
 
     def _update_scoreboard_label_styles(self) -> None:
         if not hasattr(self, "scoreboard_labels"):
@@ -763,6 +765,7 @@ class TeacherMainWindow(QMainWindow):
             self._show_stats_always,
             self._reset_aliases_on_new_quiz,
             self._scoreboard_size,
+            self._repeat_until_all_correct,
         )
         if dialog.exec():
             self._ui_font_size = dialog.get_ui_font_size()
@@ -770,6 +773,8 @@ class TeacherMainWindow(QMainWindow):
             self._show_stats_always = dialog.get_show_stats_always()
             self._reset_aliases_on_new_quiz = dialog.get_reset_aliases_on_start()
             self._scoreboard_size = dialog.get_scoreboard_size()
+            self._repeat_until_all_correct = dialog.get_repeat_until_all_correct()
+            self.quiz_manager.set_repeat_until_all_correct(self._repeat_until_all_correct)
             self._apply_font_sizes()
             self._rebuild_scoreboard_labels()
             self._update_scoreboard_view()
@@ -843,3 +848,11 @@ class TeacherMainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
+    def _update_next_question_button_label(self) -> None:
+        if not hasattr(self, "live_toggle_button"):
+            return
+        if self._live_action == LiveAction.LOAD_NEXT:
+            remaining = self.quiz_manager.get_remaining_question_count()
+            self.live_toggle_button.setText(f"{MODE3_NEXT_QUESTION} ({remaining} Q left)")
+        else:
+            self.live_toggle_button.setText(MODE3_SHOW_CORRECT)
