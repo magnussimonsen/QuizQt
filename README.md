@@ -1,42 +1,31 @@
 # QuizQt
 
-Prototype Qt6 + FastAPI classroom quiz system with Markdown/LaTeX rendering,
-multiple-choice questions, and a built-in student web page.
+Fast teacher console (Qt6) + student web page (FastAPI) for multiple-choice quizzes with Markdown/LaTeX support.
 
-## Running locally
+## Screenshots
+![Teacher dashboard](screenshots/QuizQt-2025-11-20-1.png)
+![Student page](screenshots/QuizQt-2025-11-20-2.png)
+![Live scoreboard](screenshots/QuizQt-2025-11-20-3.png)
 
+## Quick start
 ```bash
 python -m venv .venv
-.venv\Scripts\activate  # or source .venv/bin/activate on Linux
+source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
 python app_main.py
 ```
+The Qt app launches and hosts the student page at `http://<teacher-ip>:8000/`.
 
-The teacher UI launches and automatically starts the embedded FastAPI server
-for students at `http://<teacher-ip>:8000/`.
-
-## Quiz import format
-
-Use the **Import new quiz** button to load a `.txt` file containing blocks such
-as:
-
+## Quiz text format
+Each question block in `quiz_questions.txt` looks like:
 ```
-Q: What is $2 + 2$?
-A: 3
-B: 4
-C: 5
-D: 22
-CORRECT: B
-
----
-Q: Evaluate $\int_0^1 x^2 dx$
-A: 1/2
-B: 1/3
-C: 1/4
-D: 1/5
+Q: Question text with $\LaTeX$
+A: Option A
+B: Option B
+C: Option C
+D: Option D
 CORRECT: B
 ```
-
-- `Q:` supports Markdown with inline (`$...$`) and block (`$$...$$`) LaTeX.
-- Exactly four options (A–D) are required per question.
-- `CORRECT:` is optional for now; leave it out if answers are ungraded.
+- `Q:` supports Markdown + inline or block LaTeX.
+- Provide exactly four options A–D.
+- `CORRECT:` is optional; omit it for ungraded questions.
