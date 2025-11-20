@@ -1,0 +1,6 @@
+Q: What is $30^o$ in radians?
+A: $\frac{pi}{2}$
+B: $\frac{pi}{6}$
+C: $\frac{pi}{2}$
+D: $\frac{pi}{3}$
+CORRECT: B

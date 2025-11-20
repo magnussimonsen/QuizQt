@@ -1,6 +1,29 @@
 """Qt UI constants used across widgets."""
 
 WINDOW_TITLE: str = "QuizQt Teacher Console"
-PLACEHOLDER_QUESTION: str = "Enter your question here (plain text or LaTeX)."
+PLACEHOLDER_QUESTION: str = "Enter your question text (supports Markdown + LaTeX)."
 STUDENT_URL_PLACEHOLDER: str = "http://<teacher-ip>:8000/"
 ANSWER_REFRESH_INTERVAL_MS: int = 1000
+
+MODE_BUTTON_MAKE: str = "Make New Quiz"
+MODE_BUTTON_IMPORT: str = "Import Quiz"
+MODE_BUTTON_START: str = "Start Quiz"
+MODE_BUTTON_STOP: str = "Stop Quiz"
+
+MODE1_INSERT_BUTTON: str = "Add New Question"
+MODE1_SAVE_BUTTON: str = "Save Question"
+MODE1_DELETE_BUTTON: str = "Delete Question"
+MODE1_PREV_BUTTON: str = "Show Previous Question"
+MODE1_NEXT_BUTTON: str = "Show Next Question"
+MODE1_SAVE_ALL_BUTTON: str = "Save All Questions"
+
+IMPORT_BUTTON_TEXT: str = "Select quiz file"
+IMPORT_DIALOG_TITLE: str = "Select quiz file"
+IMPORT_FILE_FILTER: str = "Quiz files (*.txt);;All files (*.*)"
+
+MODE3_SHOW_CORRECT: str = "Show Correct Answer"
+MODE3_NEXT_QUESTION: str = "Next Question"
+
+NO_QUIZ_LOADED_MESSAGE: str = "Please import or create a quiz first."
+QUIZ_COMPLETE_MESSAGE: str = "You have reached the end of the quiz."
+QUIZ_SAVED_MESSAGE: str = "Quiz saved and ready to run."

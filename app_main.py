@@ -31,6 +31,10 @@ def main() -> None:
     logger.info("Starting QuizQt prototype…")
 
     quiz_manager = QuizManager()
+    # Architecture note: the QuizManager instance is still an in-memory singleton
+    # shared between Qt and FastAPI. For deployments that require persistence or
+    # multi-process scaling we can promote this to a small service (e.g. an
+    # asyncio task or lightweight database) without changing UI/server layers.
     start_api_server(quiz_manager=quiz_manager, host=DEFAULT_HOST, port=DEFAULT_PORT)
     student_url = _determine_student_url(DEFAULT_PORT)
     logger.info("Student page available at %s", student_url)

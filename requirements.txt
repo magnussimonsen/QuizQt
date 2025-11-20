@@ -1,3 +1,5 @@
 pyside6>=6.7
+pyside6-addons>=6.7
 fastapi>=0.111
 uvicorn[standard]>=0.30
+markdown-it-py>=3.0

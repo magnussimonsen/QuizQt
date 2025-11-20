@@ -10,6 +10,7 @@ from pydantic import BaseModel
 import uvicorn
 
 from quiz_app.constants.network_constants import DEFAULT_HOST, DEFAULT_PORT
+from quiz_app.core.markdown_math_renderer import renderer
 from quiz_app.core.quiz_manager import QuizManager
 
 _STUDENT_PAGE_HTML = """<!doctype html>
@@ -19,64 +20,83 @@ _STUDENT_PAGE_HTML = """<!doctype html>
     <title>QuizQt Student</title>
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
     <style>
-      :root { font-family: system-ui, sans-serif; background: #101625; color: #f5f7ff; }
+      :root { font-family: 'Inter', system-ui, sans-serif; background: #0b1120; color: #f5f7ff; }
       body { margin: 0; padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
-      .card { background: #1c2438; border-radius: 0.75rem; padding: 1.5rem; box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.3); }
-      button { background: #12a594; border: none; padding: 0.75rem 1.25rem; color: #fff; font-size: 1rem; border-radius: 0.5rem; cursor: pointer; }
-      button:hover { background: #0c7c6f; }
-      input { width: 100%; padding: 0.75rem; font-size: 1rem; border-radius: 0.5rem; border: 1px solid #3a4258; margin-bottom: 0.75rem; }
+      .card { background: #111a30; border-radius: 0.75rem; padding: 1.5rem; box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.4); }
+      #question-container { min-height: 6rem; font-size: 1.1rem; line-height: 1.6; }
+      .options-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; }
+      .option-button { border: none; border-radius: 0.75rem; padding: 1rem; font-size: 1rem; background: #1f9aa5; color: #fff; cursor: pointer; transition: transform 120ms ease, background 120ms ease; }
+      .option-button:hover { transform: translateY(-2px); background: #16808a; }
+      .option-button:disabled { opacity: 0.5; cursor: not-allowed; }
       #status { min-height: 1.25rem; }
     </style>
+    <script>
+      window.MathJax = { tex: { inlineMath: [['$','$']], displayMath: [['$$','$$']] }, svg: { fontCache: 'global' } };
+    </script>
+    <script defer src=\"https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js\"></script>
   </head>
   <body>
     <section class=\"card\">
       <h1>QuizQt Student Page</h1>
-      <p id=\"question-text\">Waiting for the teacher to start a question…</p>
+      <div id=\"question-container\">Waiting for the teacher to start a question…</div>
     </section>
     <section class=\"card\">
-      <form id=\"answer-form\">
-        <label for=\"answer-input\">Your answer</label>
-        <input id=\"answer-input\" name=\"answer\" autocomplete=\"off\" />
-        <button type=\"submit\">Submit answer</button>
-      </form>
+      <div id=\"options-container\" class=\"options-grid\"></div>
       <p id=\"status\"></p>
     </section>
     <script>
-      const questionTextEl = document.getElementById('question-text');
+      const questionContainer = document.getElementById('question-container');
+      const optionsContainer = document.getElementById('options-container');
       const statusEl = document.getElementById('status');
-      const formEl = document.getElementById('answer-form');
-      const answerInput = document.getElementById('answer-input');
+
+      function buildOptionButton(optionText, index) {
+        const button = document.createElement('button');
+        button.className = 'option-button';
+        button.textContent = `${String.fromCharCode(65 + index)}. ${optionText}`;
+        button.addEventListener('click', () => submitAnswer(index));
+        return button;
+      }
+
+      function renderOptions(options, active) {
+        optionsContainer.innerHTML = '';
+        options.forEach((option, index) => {
+          const button = buildOptionButton(option, index);
+          button.disabled = !active;
+          optionsContainer.appendChild(button);
+        });
+      }
 
       async function refreshQuestion() {
         try {
           const response = await fetch('/question');
           const payload = await response.json();
-          if (payload.active) {
-            questionTextEl.textContent = payload.question_text ?? 'Question is active.';
+          if (payload.active && payload.question_html) {
+            questionContainer.innerHTML = payload.question_html;
+            const options = Array.isArray(payload.options) ? payload.options : [];
+            renderOptions(options, true);
+            statusEl.textContent = '';
+            if (window.MathJax?.typesetPromise) {
+              await MathJax.typesetPromise([questionContainer]);
+            }
           } else {
-            questionTextEl.textContent = 'Waiting for the teacher to start a question…';
+            questionContainer.textContent = 'Waiting for the teacher to start a question…';
+            renderOptions([], false);
           }
         } catch (error) {
-          questionTextEl.textContent = 'Unable to reach the quiz server.';
+          questionContainer.textContent = 'Unable to reach the quiz server.';
+          renderOptions([], false);
         }
       }
 
-      formEl.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const answerText = answerInput.value.trim();
-        if (!answerText) {
-          statusEl.textContent = 'Please type an answer first.';
-          return;
-        }
+      async function submitAnswer(optionIndex) {
         try {
           const response = await fetch('/answer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ answer_text: answerText })
+            body: JSON.stringify({ selected_option_index: optionIndex })
           });
           if (response.ok) {
             statusEl.textContent = 'Answer sent!';
-            answerInput.value = '';
           } else {
             const body = await response.json();
             statusEl.textContent = body.detail ?? 'Unable to send answer.';
@@ -84,7 +104,7 @@ _STUDENT_PAGE_HTML = """<!doctype html>
         } catch (error) {
           statusEl.textContent = 'Unable to send answer.';
         }
-      });
+      }
 
       refreshQuestion();
       setInterval(refreshQuestion, 2000);
@@ -95,9 +115,9 @@ _STUDENT_PAGE_HTML = """<!doctype html>
 
 
 class AnswerPayload(BaseModel):
-    """Payload schema for submitted answers."""
+  """Payload schema for submitted answers."""
 
-    answer_text: str
+  selected_option_index: int
 
 
 def _get_quiz_manager_dependency(quiz_manager: QuizManager):
@@ -119,9 +139,16 @@ def create_api_app(quiz_manager: QuizManager) -> FastAPI:
     @app.get("/question")
     def get_question(manager: QuizManager = Depends(quiz_manager_dep)) -> dict[str, object]:
         question = manager.get_current_question()
+        active = manager.is_question_active()
         if question is None:
-            return {"active": False, "question_text": None}
-        return {"active": question.is_active, "question_text": question.question_text}
+            return {"active": False, "question_html": None, "options": []}
+        fragment = renderer.render_fragment(question.question_text)
+        return {
+            "active": active,
+            "question_id": question.id,
+            "question_html": fragment,
+            "options": question.options,
+        }
 
     @app.post("/answer", status_code=201)
     def submit_answer(
@@ -129,7 +156,7 @@ def create_api_app(quiz_manager: QuizManager) -> FastAPI:
         manager: QuizManager = Depends(quiz_manager_dep),
     ) -> dict[str, object]:
         try:
-            submission = manager.add_answer(payload.answer_text)
+          submission = manager.record_selected_option(payload.selected_option_index)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except RuntimeError as exc:
