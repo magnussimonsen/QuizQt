@@ -71,6 +71,10 @@ _STUDENT_PAGE_HTML = """<!doctype html>
       :root { font-family: 'Inter', system-ui, sans-serif; background: #0b1120; color: #f5f7ff; }
       body { margin: 0; padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
       .card { background: #111a30; border-radius: 0.75rem; padding: 1.5rem; box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.4); }
+      .hidden { display: none; }
+      .primary-button { border: none; border-radius: 0.75rem; padding: 0.85rem 1.5rem; font-size: 1rem; background: #1f9aa5; color: #fff; cursor: pointer; transition: transform 120ms ease, background 120ms ease; }
+      .primary-button:hover { transform: translateY(-2px); background: #16808a; }
+      .primary-button:disabled { opacity: 0.6; cursor: not-allowed; }
       #question-container { min-height: 6rem; font-size: 1.1rem; line-height: 1.6; }
       .options-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; }
       .option-button { border: none; border-radius: 0.75rem; padding: 1rem; font-size: 1rem; background: #1f9aa5; color: #fff; cursor: pointer; transition: transform 120ms ease, background 120ms ease; }
@@ -78,6 +82,7 @@ _STUDENT_PAGE_HTML = """<!doctype html>
       .option-button:disabled { opacity: 0.5; cursor: not-allowed; }
       #status { min-height: 1.25rem; }
       .student-name { margin-top: 0.25rem; color: #94a3b8; font-size: 0.95rem; }
+      .join-status { margin-top: 0.5rem; font-size: 0.95rem; color: #94a3b8; }
     </style>
     <script>
       window.MathJax = { tex: { inlineMath: [['$','$']], displayMath: [['$$','$$']] }, svg: { fontCache: 'global' } };
@@ -85,31 +90,61 @@ _STUDENT_PAGE_HTML = """<!doctype html>
     <script defer src=\"https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js\"></script>
   </head>
   <body>
-    <section class=\"card\">
-      <h1>QuizQt Student Page</h1>
-      <p id=\"student-name\" class=\"student-name\"></p>
-      <div id=\"question-container\">Waiting for the teacher to start a question…</div>
+    <section class=\"card\" id=\"join-card\">
+      <h1>QuizQt Lobby</h1>
+      <p>Press the button when you are connected and ready.</p>
+      <button id=\"join-button\" class=\"primary-button\">Join Quiz</button>
+      <p id=\"join-status\" class=\"join-status\"></p>
     </section>
-    <section class=\"card\">
-      <div id=\"options-container\" class=\"options-grid\"></div>
-      <p id=\"status\"></p>
+    <section class="card hidden" id="waiting-card">
+      <h2>Waiting Room</h2>
+      <p id="waiting-message">Waiting for the teacher to start the next question…</p>
+      <p id="student-name" class="student-name"></p>
+    </section>
+    <section class="card hidden" id="quiz-card">
+      <div id="question-container">Waiting for the teacher to start the next question…</div>
+      <div id="options-container" class="options-grid"></div>
+      <p id="status"></p>
     </section>
     <script>
       const questionContainer = document.getElementById('question-container');
       const optionsContainer = document.getElementById('options-container');
       const statusEl = document.getElementById('status');
       const studentNameEl = document.getElementById('student-name');
-      
+      const joinCard = document.getElementById('join-card');
+      const waitingCard = document.getElementById('waiting-card');
+      const quizCard = document.getElementById('quiz-card');
+      const joinButton = document.getElementById('join-button');
+      const joinStatus = document.getElementById('join-status');
+      const waitingMessage = document.getElementById('waiting-message');
+
       let currentQuestionId = null;
       let hasAnswered = false;
       let myAnswer = null;
       let displayName = null;
+      let hasJoinedLobby = false;
+      let lobbyGeneration = null;
+      let joinedLobbyGeneration = null;
+      let aliasGeneration = null;
+      let pollHandle = null;
+
+      function setVisibility(element, isVisible) {
+        if (!element) return;
+        if (isVisible) {
+          element.classList.remove('hidden');
+        } else {
+          element.classList.add('hidden');
+        }
+      }
 
       async function loadIdentity() {
         try {
           const response = await fetch('/identity');
           const payload = await response.json();
           displayName = payload.display_name || null;
+          if (typeof payload.alias_generation === 'number') {
+            aliasGeneration = payload.alias_generation;
+          }
           if (displayName) {
             studentNameEl.textContent = `You are ${displayName}`;
           } else {
@@ -120,6 +155,40 @@ _STUDENT_PAGE_HTML = """<!doctype html>
           studentNameEl.textContent = '';
         }
       }
+
+      async function joinLobby() {
+        joinButton.disabled = true;
+        joinStatus.textContent = 'Contacting server…';
+        try {
+          const response = await fetch('/join', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            joinStatus.textContent = body.detail || 'Unable to join yet. Try again soon.';
+            joinButton.disabled = false;
+            return;
+          }
+          hasJoinedLobby = true;
+          joinedLobbyGeneration = body.lobby_generation ?? lobbyGeneration;
+          if (joinedLobbyGeneration != null) {
+            lobbyGeneration = joinedLobbyGeneration;
+          }
+          await loadIdentity();
+          joinStatus.textContent = '';
+          setVisibility(joinCard, false);
+          setVisibility(waitingCard, true);
+          waitingMessage.textContent = 'Waiting for the teacher to start the next question…';
+        } catch (error) {
+          console.error('Error joining lobby:', error);
+          joinStatus.textContent = 'Unable to reach the server. Check your connection and try again.';
+          joinButton.disabled = false;
+        }
+      }
+
+      joinButton.addEventListener('click', joinLobby);
 
       function buildOptionButton(optionText, index) {
         const button = document.createElement('button');
@@ -162,7 +231,49 @@ _STUDENT_PAGE_HTML = """<!doctype html>
           const response = await fetch('/question');
           const payload = await response.json();
           console.log('Question payload:', payload);
+
+          if (typeof payload.lobby_generation !== 'undefined') {
+            lobbyGeneration = payload.lobby_generation;
+          }
+          if (typeof payload.alias_generation === 'number') {
+            const incomingAliasGeneration = payload.alias_generation;
+            if (aliasGeneration === null) {
+              aliasGeneration = incomingAliasGeneration;
+            } else if (aliasGeneration !== incomingAliasGeneration) {
+              aliasGeneration = incomingAliasGeneration;
+              await loadIdentity();
+            }
+          }
+          const lobbyOpen = Boolean(payload.lobby_open);
+          const joinedCurrentLobby = hasJoinedLobby && joinedLobbyGeneration === lobbyGeneration && lobbyGeneration !== null;
+
+          if (lobbyOpen && !joinedCurrentLobby) {
+            hasJoinedLobby = false;
+            joinedLobbyGeneration = null;
+            joinStatus.textContent = 'New quiz starting. Tap Join to participate.';
+            joinButton.disabled = false;
+            setVisibility(joinCard, true);
+            setVisibility(waitingCard, false);
+            setVisibility(quizCard, false);
+            return;
+          }
+
+          if (!joinedCurrentLobby) {
+            setVisibility(joinCard, false);
+            setVisibility(quizCard, false);
+            setVisibility(waitingCard, true);
+            waitingMessage.textContent = lobbyOpen
+              ? 'Waiting for the teacher to start the next question…'
+              : 'Waiting for the teacher to open the lobby…';
+            questionContainer.textContent = 'Waiting for the teacher to start the next question…';
+            renderOptions([], false);
+            statusEl.textContent = '';
+            return;
+          }
+
           if (payload.active) {
+            setVisibility(waitingCard, false);
+            setVisibility(quizCard, true);
             // Only update if question has changed
             if (payload.question_id !== currentQuestionId) {
               console.log('New question detected, updating display');
@@ -179,9 +290,29 @@ _STUDENT_PAGE_HTML = """<!doctype html>
               typesetMath();
             }
           } else {
-            // Question is not active - teacher has stopped it or shown answer
+            setVisibility(waitingCard, true);
+            waitingMessage.textContent = 'Waiting for the teacher to start the next question…';
+
+            if (payload.question_id === null) {
+              setVisibility(quizCard, false);
+              if (currentQuestionId !== null) {
+                console.log('Question not active or no question');
+                currentQuestionId = null;
+                hasAnswered = false;
+                myAnswer = null;
+              }
+              questionContainer.textContent = 'Waiting for the teacher to start the next question…';
+              renderOptions([], false);
+              if (!hasAnswered) {
+                statusEl.textContent = '';
+              }
+            } else {
+              setVisibility(quizCard, true);
+              const options = Array.isArray(payload.options) ? payload.options : [];
+              renderOptions(options, false);
+            }
+
             if (payload.correct_option_index !== null && myAnswer !== null && hasAnswered) {
-              // Show correct/wrong feedback
               if (myAnswer === payload.correct_option_index) {
                 statusEl.textContent = '✓ Correct!';
                 statusEl.style.color = '#4ade80';
@@ -189,14 +320,6 @@ _STUDENT_PAGE_HTML = """<!doctype html>
                 statusEl.textContent = '✗ Sorry, wrong answer. Correct answer: ' + String.fromCharCode(65 + payload.correct_option_index);
                 statusEl.style.color = '#f87171';
               }
-            }
-            if (currentQuestionId !== null && payload.question_id === null) {
-              console.log('Question not active or no question');
-              currentQuestionId = null;
-              hasAnswered = false;
-              myAnswer = null;
-              questionContainer.textContent = 'Waiting for the teacher to start a question…';
-              renderOptions([], false);
             }
           }
         } catch (error) {
@@ -238,19 +361,26 @@ _STUDENT_PAGE_HTML = """<!doctype html>
         }
       }
 
-      // Start polling immediately - MathJax will be available when needed
-      console.log('QuizQt Student Page loaded, starting refresh cycle...');
+      console.log('QuizQt Student Page loaded. Waiting for the lobby join.');
       loadIdentity();
       refreshQuestion();
-      setInterval(refreshQuestion, 2000);
+      pollHandle = setInterval(refreshQuestion, 2000);
     </script>
   </body>
 </html>
 """
-class AnswerPayload(BaseModel):
-  """Payload schema for submitted answers."""
 
-  selected_option_index: int
+
+class AnswerPayload(BaseModel):
+    """Payload schema for submitted answers."""
+
+    selected_option_index: int
+
+
+class JoinPayload(BaseModel):
+    """Payload schema for the lobby join flow."""
+
+    display_name: str | None = None
 
 
 def _get_quiz_manager_dependency(quiz_manager: QuizManager):
@@ -275,16 +405,33 @@ def create_api_app(quiz_manager: QuizManager) -> FastAPI:
         request: Request,
         response: Response,
         manager: QuizManager = Depends(quiz_manager_dep),
-    ) -> dict[str, str]:
+    ) -> dict[str, object]:
         alias = _ensure_alias(request, response, manager, name_assigner)
-        return {"display_name": alias}
+        return {
+            "display_name": alias,
+            "alias_generation": manager.get_alias_generation(),
+        }
 
     @app.get("/question")
     def get_question(manager: QuizManager = Depends(quiz_manager_dep)) -> dict[str, object]:
         question = manager.get_current_question()
         active = manager.is_question_active()
+        lobby_open = manager.lobby_is_open()
+        lobby_generation = manager.get_lobby_generation()
+        quiz_started = manager.has_quiz_session_started()
+        alias_generation = manager.get_alias_generation()
         if question is None:
-            return {"active": False, "question_html": None, "options": [], "correct_option_index": None}
+            return {
+                "active": False,
+                "question_id": None,
+                "question_html": None,
+                "options": [],
+                "correct_option_index": None,
+                "lobby_open": lobby_open,
+                "lobby_generation": lobby_generation,
+                "quiz_started": quiz_started,
+                "alias_generation": alias_generation,
+            }
         fragment = renderer.render_fragment(question.question_text)
         # Only send correct answer when question is not active (teacher has shown answer)
         correct_index = None if active else question.correct_option_index
@@ -294,6 +441,10 @@ def create_api_app(quiz_manager: QuizManager) -> FastAPI:
             "question_html": fragment,
             "options": question.options,
             "correct_option_index": correct_index,
+            "lobby_open": lobby_open,
+            "lobby_generation": lobby_generation,
+            "quiz_started": quiz_started,
+            "alias_generation": alias_generation,
         }
 
     @app.post("/answer", status_code=201)
@@ -317,6 +468,30 @@ def create_api_app(quiz_manager: QuizManager) -> FastAPI:
         return {
             "question_id": submission.question_id,
             "submitted_at": submission.submitted_at.isoformat(),
+        }
+
+    @app.post("/join", status_code=201)
+    def join_lobby(
+        payload: JoinPayload,
+        request: Request,
+        response: Response,
+        manager: QuizManager = Depends(quiz_manager_dep),
+    ) -> dict[str, object]:
+        alias = _ensure_alias(request, response, manager, name_assigner)
+        chosen_name = alias
+        if payload.display_name:
+            stripped = payload.display_name.strip()
+            if stripped:
+                chosen_name = stripped
+        try:
+            joined = manager.register_lobby_student(chosen_name)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "student_id": joined.student_id,
+            "display_name": joined.display_name,
+            "joined_at": joined.joined_at.isoformat(),
+          "lobby_generation": manager.get_lobby_generation(),
         }
 
     return app

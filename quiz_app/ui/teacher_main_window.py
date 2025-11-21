@@ -8,11 +8,15 @@ from typing import List
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -20,8 +24,6 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
-    QComboBox,
-    QGroupBox,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
@@ -46,6 +48,10 @@ from quiz_app.constants.ui_constants import (
     MODE1_NEXT_BUTTON,
     MODE1_PREV_BUTTON,
     MODE1_SAVE_BUTTON,
+    MODE4_ACTION_BUTTON,
+    MODE4_DESCRIPTION,
+    MODE4_EMPTY_STATE,
+    MODE4_READY_COUNT_TEMPLATE,
     MODE3_NEXT_QUESTION,
     MODE3_SHOW_CORRECT,
     MODE_BUTTON_EDIT,
@@ -82,6 +88,7 @@ class TeacherMode(Enum):
     """High-level UI mode for the teacher console."""
 
     QUIZ_CREATION = auto()
+    QUIZ_LOBBY = auto()
     QUIZ_LIVE = auto()
 
 
@@ -107,6 +114,8 @@ class TeacherMainWindow(QMainWindow):
         self._has_unsaved_changes: bool = False
         self._live_session_active = False
         self._live_action = LiveAction.SHOW_CORRECT
+        self._lobby_session_open = False
+        self._lobby_snapshot_ids: list[str] = []
         
         # Font size settings
         self._ui_font_size: int = 10
@@ -137,9 +146,10 @@ class TeacherMainWindow(QMainWindow):
 
         # QStackedWidget keeps each mode isolated. We considered manual hide/show but
         # the stacked approach reduces bookkeeping while still allowing lazy widget
-        # construction. If later we add more modes, simply append another page.
+        # construction. Mode 4 (lobby) sits between creation and live delivery.
         self.mode_stack = QStackedWidget(self)
         self.mode_stack.addWidget(self._build_mode1_creation_panel())
+        self.mode_stack.addWidget(self._build_mode4_lobby_panel())
         self.mode_stack.addWidget(self._build_mode3_live_panel())
         root_layout.addWidget(self.mode_stack)
 
@@ -241,6 +251,37 @@ class TeacherMainWindow(QMainWindow):
 
         return panel
 
+    def _build_mode4_lobby_panel(self) -> QWidget:
+        panel = QWidget(self)
+        layout = QVBoxLayout()
+        panel.setLayout(layout)
+
+        self.lobby_description_label = QLabel(MODE4_DESCRIPTION, self)
+        self.lobby_description_label.setWordWrap(True)
+        layout.addWidget(self.lobby_description_label)
+
+        self.lobby_network_label = QLabel(f"Students connect to: {self.student_url}", self)
+        self.lobby_network_label.setWordWrap(True)
+        self.lobby_network_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        layout.addWidget(self.lobby_network_label)
+
+        self.lobby_ready_label = QLabel(MODE4_READY_COUNT_TEMPLATE.format(count=0), self)
+        layout.addWidget(self.lobby_ready_label)
+
+        self.lobby_participant_list = QListWidget(self)
+        self.lobby_participant_list.setAlternatingRowColors(True)
+        layout.addWidget(self.lobby_participant_list, stretch=1)
+
+        self.lobby_empty_label = QLabel(MODE4_EMPTY_STATE, self)
+        self.lobby_empty_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.lobby_empty_label)
+
+        self.lobby_start_button = QPushButton(MODE4_ACTION_BUTTON, self)
+        self.lobby_start_button.clicked.connect(self._handle_begin_quiz_from_lobby)  # type: ignore[arg-type]
+        layout.addWidget(self.lobby_start_button)
+
+        return panel
+
     def _build_mode3_live_panel(self) -> QWidget:
         panel = QWidget(self)
         layout = QVBoxLayout()
@@ -315,11 +356,11 @@ class TeacherMainWindow(QMainWindow):
         self.refresh_timer.start()
 
     def _refresh_state(self) -> None:
-        if self._mode != TeacherMode.QUIZ_LIVE:
-            return
-
-        # Only update stats - don't refresh the question preview to avoid flickering
-        self._update_live_stats()
+        if self._mode == TeacherMode.QUIZ_LIVE:
+            # Only update stats - don't refresh the question preview to avoid flickering
+            self._update_live_stats()
+        elif self._mode == TeacherMode.QUIZ_LOBBY:
+            self._refresh_lobby_participants()
 
     # ------------------------------------------------------------------
     # Mode handling
@@ -327,16 +368,22 @@ class TeacherMainWindow(QMainWindow):
     def _set_mode(self, mode: TeacherMode) -> None:
         self._mode = mode
         self.make_mode_button.setChecked(mode == TeacherMode.QUIZ_CREATION)
-        self.start_mode_button.setChecked(mode == TeacherMode.QUIZ_LIVE)
+        self.start_mode_button.setChecked(mode in (TeacherMode.QUIZ_LOBBY, TeacherMode.QUIZ_LIVE))
 
         live_mode = mode == TeacherMode.QUIZ_LIVE
-        self.make_mode_button.setEnabled(not live_mode)
-        self.import_mode_button.setEnabled(not live_mode)
-        self.edit_mode_button.setEnabled(not live_mode)
+        lobby_mode = mode == TeacherMode.QUIZ_LOBBY
+        disable_main_modes = live_mode or lobby_mode
+        self.make_mode_button.setEnabled(not disable_main_modes)
+        self.import_mode_button.setEnabled(not disable_main_modes)
+        self.edit_mode_button.setEnabled(not disable_main_modes)
 
-        # Map mode to stack index (0=creation, 1=live)
-        stack_index = 0 if mode == TeacherMode.QUIZ_CREATION else 1
-        self.mode_stack.setCurrentIndex(stack_index)
+        # Map mode to stack index (0=creation, 1=lobby, 2=live)
+        index_map = {
+            TeacherMode.QUIZ_CREATION: 0,
+            TeacherMode.QUIZ_LOBBY: 1,
+            TeacherMode.QUIZ_LIVE: 2,
+        }
+        self.mode_stack.setCurrentIndex(index_map[mode])
 
     def _handle_make_new_quiz(self) -> None:
         """Handle Make New Quiz button with safety checks for existing quiz data.
@@ -404,8 +451,77 @@ class TeacherMainWindow(QMainWindow):
             self._stop_live_session()
             return
 
-        self._set_mode(TeacherMode.QUIZ_LIVE)
-        self._start_live_session()
+        if self._lobby_session_open:
+            self._cancel_lobby_session()
+            return
+
+        self._enter_lobby_mode()
+
+    def _enter_lobby_mode(self) -> None:
+        if not self.quiz_manager.has_loaded_quiz():
+            show_warning(self, "No quiz", NO_QUIZ_LOADED_MESSAGE)
+            self.start_mode_button.setChecked(False)
+            return
+
+        self.quiz_manager.begin_lobby_session()
+        self._lobby_session_open = True
+        self.start_mode_button.setText(MODE_BUTTON_START)
+        self.start_mode_button.setChecked(True)
+        self.start_mode_button.setEnabled(False)
+        self._lobby_snapshot_ids = []
+        self.lobby_participant_list.clear()
+        self.lobby_ready_label.setText(MODE4_READY_COUNT_TEMPLATE.format(count=0))
+        self.lobby_empty_label.setText(MODE4_EMPTY_STATE)
+        self._update_student_url_labels()
+        self._set_mode(TeacherMode.QUIZ_LOBBY)
+        self._refresh_lobby_participants()
+
+    def _cancel_lobby_session(self) -> None:
+        self.quiz_manager.cancel_lobby_session()
+        self._lobby_session_open = False
+        self.start_mode_button.setText(MODE_BUTTON_START)
+        self.start_mode_button.setChecked(False)
+        self.start_mode_button.setEnabled(True)
+        self._lobby_snapshot_ids = []
+        if hasattr(self, "lobby_participant_list"):
+            self.lobby_participant_list.clear()
+            self.lobby_ready_label.setText(MODE4_READY_COUNT_TEMPLATE.format(count=0))
+            self.lobby_empty_label.setText(MODE4_EMPTY_STATE)
+        self._set_mode(TeacherMode.QUIZ_CREATION)
+
+    def _handle_begin_quiz_from_lobby(self) -> None:
+        if not self._lobby_session_open:
+            return
+        if self.lobby_participant_list.count() == 0:
+            show_warning(self, "No students", "Wait for at least one student to join before starting the quiz.")
+            return
+        success = self._start_live_session()
+        if success:
+            self.quiz_manager.finalize_lobby_students()
+            self._lobby_session_open = False
+        else:
+            self._cancel_lobby_session()
+
+    def _refresh_lobby_participants(self) -> None:
+        students = self.quiz_manager.get_lobby_students()
+        snapshot = [student.student_id for student in students]
+        if snapshot == self._lobby_snapshot_ids:
+            return
+        self._lobby_snapshot_ids = snapshot
+        self.lobby_participant_list.clear()
+        for student in students:
+            timestamp = student.joined_at.strftime("%H:%M:%S")
+            QListWidgetItem(f"{student.display_name} — Ready at {timestamp}", self.lobby_participant_list)
+        count = len(students)
+        self.lobby_ready_label.setText(MODE4_READY_COUNT_TEMPLATE.format(count=count))
+        self.lobby_empty_label.setVisible(count == 0)
+
+    def _update_student_url_labels(self) -> None:
+        label_text = f"Students connect to: {self.student_url}"
+        if hasattr(self, "live_network_label"):
+            self.live_network_label.setText(label_text)
+        if hasattr(self, "lobby_network_label"):
+            self.lobby_network_label.setText(label_text)
 
     # ------------------------------------------------------------------
     # Mode 1 – quiz creation helpers
@@ -646,12 +762,12 @@ class TeacherMainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Mode 3 – live delivery
     # ------------------------------------------------------------------
-    def _start_live_session(self) -> None:
+    def _start_live_session(self) -> bool:
         if not self.quiz_manager.has_loaded_quiz():
             show_warning(self, "No quiz", NO_QUIZ_LOADED_MESSAGE)
             self.start_mode_button.setChecked(False)
             self._set_mode(TeacherMode.QUIZ_CREATION)
-            return
+            return False
 
         if self._reset_aliases_on_new_quiz:
             self.quiz_manager.reset_student_aliases()
@@ -663,15 +779,19 @@ class TeacherMainWindow(QMainWindow):
             show_info(self, "Quiz complete", QUIZ_COMPLETE_MESSAGE)
             self.start_mode_button.setChecked(False)
             self._set_mode(TeacherMode.QUIZ_CREATION)
-            return
+            return False
 
         self._live_session_active = True
         self.start_mode_button.setText(MODE_BUTTON_STOP)
+        self.start_mode_button.setEnabled(True)
         self.live_toggle_button.setEnabled(True)
         self._live_action = LiveAction.SHOW_CORRECT
         self._update_next_question_button_label()
         self._hide_stats()  # Hide all stats when starting question
         self._display_live_question(question)
+        self._set_mode(TeacherMode.QUIZ_LIVE)
+        self._lobby_session_open = False
+        return True
 
     def _stop_live_session(self) -> None:
         self.quiz_manager.stop_current_question()
@@ -679,6 +799,7 @@ class TeacherMainWindow(QMainWindow):
         self._live_session_active = False
         self.start_mode_button.setText(MODE_BUTTON_START)
         self.start_mode_button.setChecked(False)
+        self.start_mode_button.setEnabled(True)
         self.live_toggle_button.setEnabled(False)
         self.live_correct_label.setVisible(False)
         if hasattr(self, "answers_received_label"):
@@ -713,7 +834,7 @@ class TeacherMainWindow(QMainWindow):
             self._display_live_question(question)
 
     def _display_live_question(self, question: QuizQuestion) -> None:
-        self.live_network_label.setText(f"Students connect to: {self.student_url}")
+        self._update_student_url_labels()
         html = render_question_with_options(question.question_text, question.options, self._game_font_size)
         self.live_preview_view.setHtml(html)
         self._update_live_stats()
@@ -889,6 +1010,7 @@ class TeacherMainWindow(QMainWindow):
             self.save_quiz_button,
             self.edit_mode_button,
             self.start_mode_button,
+            self.lobby_start_button,
             self.about_button,
             self.settings_button,
             self.creation_insert_button,

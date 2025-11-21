@@ -6,8 +6,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import random
 from threading import Lock
+from uuid import uuid4
 
-from .models import QuizQuestion, SubmittedAnswer
+from .models import JoinedStudent, QuizQuestion, SubmittedAnswer
 
 
 @dataclass(slots=True)
@@ -46,6 +47,10 @@ class QuizManager:
         self._alias_generation: int = 0
         self._repeat_until_all_correct: bool = False
         self._rng = random.Random()
+        self._lobby_open: bool = False
+        self._lobby_students: dict[str, JoinedStudent] = {}
+        self._lobby_generation: int = 0
+        self._quiz_session_active: bool = False
 
     def load_quiz_from_questions(self, questions: list[QuizQuestion]) -> None:
         """Replace the current quiz with a new ordered list of questions."""
@@ -63,6 +68,10 @@ class QuizManager:
             self._overall_answer_history = []
             self._scoreboard.clear()
             self._current_question_aliases.clear()
+            self._lobby_open = False
+            self._lobby_students.clear()
+            self._lobby_generation = 0
+            self._quiz_session_active = False
 
     def set_repeat_until_all_correct(self, enabled: bool) -> None:
         """Toggle repeat-mode behavior for question selection."""
@@ -96,6 +105,7 @@ class QuizManager:
             self._question_active = True
             self._answers = []
             self._current_question_aliases.clear()
+            self._quiz_session_active = True
             return question
 
     def move_to_next_question(self) -> QuizQuestion | None:
@@ -184,6 +194,10 @@ class QuizManager:
         with self._lock:
             return list(self._loaded_quiz)
 
+    def has_quiz_session_started(self) -> bool:
+        with self._lock:
+            return self._quiz_session_active
+
     def quiz_is_fully_saved(self) -> bool:
         """Check if all questions in the loaded quiz have is_saved == True.
         
@@ -210,6 +224,7 @@ class QuizManager:
             self._scoreboard.clear()
             self._current_question_aliases.clear()
             self._alias_generation = 0
+            self._quiz_session_active = False
 
     def reset_quiz_progress(self) -> None:
         """Reset live progression so the next session starts from the first question."""
@@ -222,6 +237,58 @@ class QuizManager:
             self._current_question_aliases.clear()
             for question in self._loaded_quiz:
                 question.all_students_answered_correctly = False
+            self._lobby_students.clear()
+            self._lobby_open = False
+            self._quiz_session_active = False
+        
+    def begin_lobby_session(self) -> None:
+        """Open the lobby so students can join the upcoming quiz."""
+        with self._lock:
+            self._lobby_open = True
+            self._lobby_generation += 1
+            self._lobby_students.clear()
+
+    def cancel_lobby_session(self) -> None:
+        """Close the lobby and discard any pending students."""
+        with self._lock:
+            self._lobby_open = False
+            self._lobby_students.clear()
+
+    def lobby_is_open(self) -> bool:
+        with self._lock:
+            return self._lobby_open
+
+    def register_lobby_student(self, display_name: str) -> JoinedStudent:
+        """Track a student who indicated readiness during the lobby phase."""
+        with self._lock:
+            if not self._lobby_open:
+                raise RuntimeError("Lobby is not currently open.")
+            entry = self._lobby_students.get(display_name)
+            if entry is None:
+                entry = JoinedStudent(
+                    student_id=uuid4().hex,
+                    display_name=display_name,
+                    joined_at=datetime.utcnow(),
+                )
+                self._lobby_students[display_name] = entry
+            return entry
+
+    def get_lobby_students(self) -> list[JoinedStudent]:
+        """Return a chronological list of students ready in the lobby."""
+        with self._lock:
+            return sorted(self._lobby_students.values(), key=lambda student: student.joined_at)
+
+    def finalize_lobby_students(self) -> list[JoinedStudent]:
+        """Freeze lobby participants and close the lobby."""
+        with self._lock:
+            snapshot = sorted(self._lobby_students.values(), key=lambda student: student.joined_at)
+            self._lobby_students.clear()
+            self._lobby_open = False
+            return snapshot
+
+    def get_lobby_generation(self) -> int:
+        with self._lock:
+            return self._lobby_generation
 
     def add_question(self, question: QuizQuestion) -> None:
         """Add a new question to the end of the quiz."""
@@ -333,6 +400,7 @@ class QuizManager:
         self._question_active = True
         self._answers = []
         self._current_question_aliases.clear()
+        self._quiz_session_active = True
         return self._current_question
 
     def _select_unmastered_question(self) -> QuizQuestion | None:
@@ -347,6 +415,7 @@ class QuizManager:
         self._question_active = True
         self._answers = []
         self._current_question_aliases.clear()
+        self._quiz_session_active = True
         return self._current_question
 
     def _update_mastery_for_current_question(self) -> None:

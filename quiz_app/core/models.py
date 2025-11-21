@@ -13,6 +13,7 @@ class QuizQuestion:
     id: int
     question_text: str
     options: list[str]
+    question_started_at: datetime | None = None  # Track presentation time for analytics
     correct_option_index: int | None = None
     is_saved: bool = True
     all_students_answered_correctly: bool = False
@@ -26,3 +27,12 @@ class SubmittedAnswer:
     selected_option_index: int
     submitted_at: datetime
     display_name: str | None = None
+
+
+@dataclass(slots=True)
+class JoinedStudent:
+    """Represents a student who confirmed readiness in the lobby."""
+
+    student_id: str
+    display_name: str
+    joined_at: datetime
