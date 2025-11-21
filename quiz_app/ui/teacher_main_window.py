@@ -547,9 +547,8 @@ class TeacherMainWindow(QMainWindow):
         self._ensure_alias_reset_for_session()
         self.quiz_manager.begin_lobby_session()
         self._lobby_session_open = True
-        self.start_mode_button.setText(MODE_BUTTON_START)
+        self.start_mode_button.setText(MODE_BUTTON_STOP)
         self.start_mode_button.setChecked(True)
-        self.start_mode_button.setEnabled(False)
         self._lobby_snapshot_ids = []
         self.lobby_participant_list.clear()
         self.lobby_ready_label.setText(MODE4_READY_COUNT_TEMPLATE.format(count=0))

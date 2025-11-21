@@ -10,7 +10,7 @@ MODE_BUTTON_IMPORT: str = "Import Quiz"
 MODE_BUTTON_SAVE_FILE: str = "Save Quiz to File"
 MODE_BUTTON_EDIT: str = "Edit Quiz"
 MODE_BUTTON_START: str = "Start Quiz"
-MODE_BUTTON_STOP: str = "Stop Quiz"
+MODE_BUTTON_STOP: str = "End Quiz"
 
 MODE1_INSERT_BUTTON: str = "Add New Question"
 MODE1_SAVE_BUTTON: str = "Save Question"
