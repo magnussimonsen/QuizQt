@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 from threading import Lock
 from uuid import uuid4
@@ -49,11 +49,17 @@ class QuizManager:
         self._alias_generation: int = 0
         self._repeat_until_all_correct: bool = False
         self._rng = random.Random()
+        self._shuffle_rng = random.Random()
         self._lobby_open: bool = False
         self._lobby_students: dict[str, JoinedStudent] = {}
         self._lobby_generation: int = 0
         self._quiz_session_active: bool = False
         self._question_started_at: datetime | None = None
+        self._current_option_order: list[int] | None = None
+        self._current_shuffled_options: list[str] = []
+        self._shuffled_correct_option_index: int | None = None
+        self._session_students: set[str] = set()
+        self._pending_students_for_question: set[str] = set()
 
     def load_quiz_from_questions(self, questions: list[QuizQuestion]) -> None:
         """Replace the current quiz with a new ordered list of questions."""
@@ -76,17 +82,24 @@ class QuizManager:
             self._lobby_generation = 0
             self._quiz_session_active = False
             self._question_started_at = None
+            self._clear_display_option_state()
 
     def set_repeat_until_all_correct(self, enabled: bool) -> None:
         """Toggle repeat-mode behavior for question selection."""
         with self._lock:
             self._repeat_until_all_correct = enabled
 
+    def set_shuffle_seed(self, seed: int | None) -> None:
+        """Seed the internal RNG for deterministic option shuffling when desired."""
+        with self._lock:
+            self._shuffle_rng.seed(seed)
+
     def set_manual_question(
         self,
         question_text: str,
         options: list[str],
         correct_option_index: int | None,
+        time_limit_seconds: int | None = None,
     ) -> QuizQuestion:
         """Create an ad-hoc question typed directly in the UI."""
 
@@ -96,22 +109,18 @@ class QuizManager:
         validated_options = self._validate_options(options)
         if correct_option_index is not None and not 0 <= correct_option_index < 4:
             raise ValueError("Correct option must be A, B, C, or D.")
+        normalized_time_limit = self._normalize_time_limit(time_limit_seconds)
         question = QuizQuestion(
             id=self._next_question_id(),
             question_text=cleaned_text,
             options=validated_options,
+            time_limit_seconds=normalized_time_limit,
             correct_option_index=correct_option_index,
             is_saved=True,
         )
 
         with self._lock:
-            self._current_question = question
-            self._question_active = True
-            self._answers = []
-            self._current_question_aliases.clear()
-            self._quiz_session_active = True
-            self._question_started_at = datetime.utcnow()
-            return question
+            return self._initialize_active_question(question)
 
     def move_to_next_question(self) -> QuizQuestion | None:
         """Advance to the next imported question, returning it if available."""
@@ -127,6 +136,7 @@ class QuizManager:
         """Stop accepting answers for the active question."""
         with self._lock:
             self._question_active = False
+            self._apply_unanswered_time_penalties()
             self._question_started_at = None
             if self._repeat_until_all_correct:
                 self._update_mastery_for_current_question()
@@ -141,13 +151,23 @@ class QuizManager:
             if self._current_question is None or not self._question_active:
                 raise RuntimeError("No active question available.")
 
-            if not 0 <= selected_option_index < len(self._current_question.options):
+            if self._time_limit_has_elapsed():
+                raise RuntimeError("Time limit expired for this question.")
+
+            option_count = (
+                len(self._current_option_order)
+                if self._current_option_order is not None
+                else len(self._current_question.options)
+            )
+            if not 0 <= selected_option_index < option_count:
                 raise ValueError("Selected option is out of range.")
 
             if display_name:
                 if display_name in self._current_question_aliases:
                     raise RuntimeError("This student has already answered the current question.")
                 self._current_question_aliases.add(display_name)
+                self._session_students.add(display_name)
+                self._pending_students_for_question.discard(display_name)
 
             submission = SubmittedAnswer(
                 question_id=self._current_question.id,
@@ -158,7 +178,8 @@ class QuizManager:
             self._answers.append(submission)
             elapsed_ms = self._compute_elapsed_answer_time(submission.submitted_at)
             if self._current_question.correct_option_index is not None:
-                is_correct = selected_option_index == self._current_question.correct_option_index
+                mapped_index = self._map_display_index_to_original(selected_option_index)
+                is_correct = mapped_index == self._current_question.correct_option_index
                 self._overall_answer_history.append(is_correct)
                 if display_name:
                     self._update_scoreboard(display_name, is_correct, elapsed_ms)
@@ -168,6 +189,22 @@ class QuizManager:
         with self._lock:
             return self._current_question
 
+    def get_current_display_options(self) -> list[str]:
+        with self._lock:
+            if self._current_question is None:
+                return []
+            if self._current_option_order is None:
+                return list(self._current_question.options)
+            return list(self._current_shuffled_options)
+
+    def get_current_display_correct_index(self) -> int | None:
+        with self._lock:
+            if self._current_question is None:
+                return None
+            if self._current_option_order is None:
+                return self._current_question.correct_option_index
+            return self._shuffled_correct_option_index
+
     def is_question_active(self) -> bool:
         with self._lock:
             return self._question_active
@@ -175,6 +212,25 @@ class QuizManager:
     def get_answers_for_current_question(self) -> list[SubmittedAnswer]:
         with self._lock:
             return list(self._answers)
+
+    def get_current_question_start_time(self) -> datetime | None:
+        with self._lock:
+            return self._question_started_at
+
+    def _time_limit_deadline(self) -> datetime | None:
+        if self._current_question is None:
+            return None
+        if self._current_question.time_limit_seconds is None:
+            return None
+        if self._question_started_at is None:
+            return None
+        return self._question_started_at + timedelta(seconds=self._current_question.time_limit_seconds)
+
+    def _time_limit_has_elapsed(self) -> bool:
+        deadline = self._time_limit_deadline()
+        if deadline is None:
+            return False
+        return datetime.utcnow() >= deadline
 
     def has_more_quiz_questions(self) -> bool:
         with self._lock:
@@ -233,6 +289,9 @@ class QuizManager:
             self._alias_generation = 0
             self._quiz_session_active = False
             self._question_started_at = None
+            self._clear_display_option_state()
+            self._session_students.clear()
+            self._pending_students_for_question.clear()
 
     def reset_quiz_progress(self) -> None:
         """Reset live progression so the next session starts from the first question."""
@@ -249,6 +308,8 @@ class QuizManager:
             self._lobby_open = False
             self._quiz_session_active = False
             self._question_started_at = None
+            self._clear_display_option_state()
+            self._pending_students_for_question.clear()
         
     def begin_lobby_session(self) -> None:
         """Open the lobby so students can join the upcoming quiz."""
@@ -256,12 +317,14 @@ class QuizManager:
             self._lobby_open = True
             self._lobby_generation += 1
             self._lobby_students.clear()
+            self._session_students.clear()
 
     def cancel_lobby_session(self) -> None:
         """Close the lobby and discard any pending students."""
         with self._lock:
             self._lobby_open = False
             self._lobby_students.clear()
+            self._session_students.clear()
 
     def lobby_is_open(self) -> bool:
         with self._lock:
@@ -293,6 +356,7 @@ class QuizManager:
             snapshot = sorted(self._lobby_students.values(), key=lambda student: student.joined_at)
             self._lobby_students.clear()
             self._lobby_open = False
+            self._session_students = {student.display_name for student in snapshot}
             return snapshot
 
     def get_lobby_generation(self) -> int:
@@ -316,6 +380,7 @@ class QuizManager:
                 id=self._loaded_quiz[index].id,
                 question_text=prepared.question_text,
                 options=prepared.options,
+                time_limit_seconds=prepared.time_limit_seconds,
                 correct_option_index=prepared.correct_option_index,
                 is_saved=prepared.is_saved,
             )
@@ -361,6 +426,8 @@ class QuizManager:
             self._alias_generation += 1
             self._scoreboard.clear()
             self._current_question_aliases.clear()
+            self._session_students.clear()
+            self._pending_students_for_question.clear()
             return self._alias_generation
 
     def get_alias_generation(self) -> int:
@@ -415,28 +482,57 @@ class QuizManager:
             return None
         self._quiz_position = next_index
         self._current_question = self._loaded_quiz[next_index]
-        self._question_active = True
-        self._answers = []
-        self._current_question_aliases.clear()
-        self._quiz_session_active = True
-        self._question_started_at = datetime.utcnow()
-        return self._current_question
+        return self._initialize_active_question(self._current_question)
 
     def _select_unmastered_question(self) -> QuizQuestion | None:
         candidates = [idx for idx, question in enumerate(self._loaded_quiz) if not question.all_students_answered_correctly]
         if not candidates:
             self._current_question = None
             self._question_active = False
+            self._question_started_at = None
+            self._clear_display_option_state()
             return None
         next_index = self._rng.choice(candidates)
         self._quiz_position = next_index
         self._current_question = self._loaded_quiz[next_index]
+        return self._initialize_active_question(self._current_question)
+
+    def _initialize_active_question(self, question: QuizQuestion) -> QuizQuestion:
+        self._current_question = question
         self._question_active = True
         self._answers = []
         self._current_question_aliases.clear()
         self._quiz_session_active = True
         self._question_started_at = datetime.utcnow()
-        return self._current_question
+        # Expect every session participant to answer this question
+        self._pending_students_for_question = set(self._session_students)
+        self._shuffle_current_question_options()
+        return question
+
+    def _shuffle_current_question_options(self) -> None:
+        if self._current_question is None:
+            self._clear_display_option_state()
+            return
+        option_count = len(self._current_question.options)
+        order = list(range(option_count))
+        if option_count > 1:
+            self._shuffle_rng.shuffle(order)
+        self._current_option_order = order
+        self._current_shuffled_options = [self._current_question.options[idx] for idx in order]
+        if self._current_question.correct_option_index is None:
+            self._shuffled_correct_option_index = None
+        else:
+            try:
+                self._shuffled_correct_option_index = order.index(self._current_question.correct_option_index)
+            except ValueError:
+                self._shuffled_correct_option_index = None
+
+    def _map_display_index_to_original(self, display_index: int) -> int:
+        if self._current_option_order is None:
+            return display_index
+        if not 0 <= display_index < len(self._current_option_order):
+            raise ValueError("Selected option is out of range.")
+        return self._current_option_order[display_index]
 
     def _update_mastery_for_current_question(self) -> None:
         if self._current_question is None:
@@ -461,13 +557,42 @@ class QuizManager:
         cleaned_text = question.question_text.strip()
         if not cleaned_text:
             raise ValueError("Question text must not be empty.")
+        normalized_time_limit = self._normalize_time_limit(question.time_limit_seconds)
         return QuizQuestion(
             id=self._next_question_id(),
             question_text=cleaned_text,
             options=options,
+            time_limit_seconds=normalized_time_limit,
             correct_option_index=question.correct_option_index,
             is_saved=True,
         )
+
+    def _clear_display_option_state(self) -> None:
+        self._current_option_order = None
+        self._current_shuffled_options = []
+        self._shuffled_correct_option_index = None
+        self._pending_students_for_question.clear()
+
+    def _apply_unanswered_time_penalties(self) -> None:
+        if self._current_question is None:
+            self._pending_students_for_question.clear()
+            return
+        if not self._pending_students_for_question:
+            return
+        if not self._time_limit_has_elapsed():
+            self._pending_students_for_question.clear()
+            return
+        time_limit = self._current_question.time_limit_seconds
+        if time_limit is None or time_limit <= 0:
+            self._pending_students_for_question.clear()
+            return
+        penalty_ms = time_limit * 1000
+        for display_name in list(self._pending_students_for_question):
+            if not display_name:
+                continue
+            self._update_scoreboard(display_name, False, penalty_ms)
+            self._current_question_aliases.add(display_name)
+        self._pending_students_for_question.clear()
 
     @staticmethod
     def _validate_options(options: list[str]) -> list[str]:
@@ -477,6 +602,16 @@ class QuizManager:
         if any(not option for option in cleaned):
             raise ValueError("Option text cannot be empty.")
         return cleaned
+
+    @staticmethod
+    def _normalize_time_limit(time_limit_seconds: int | None) -> int | None:
+        if time_limit_seconds is None:
+            return None
+        if not isinstance(time_limit_seconds, int):
+            raise ValueError("Time limit must be provided as an integer number of seconds.")
+        if time_limit_seconds <= 0:
+            raise ValueError("Time limit must be a positive integer.")
+        return time_limit_seconds
 
     def _next_question_id(self) -> int:
         self._question_counter += 1

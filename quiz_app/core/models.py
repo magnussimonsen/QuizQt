@@ -13,6 +13,7 @@ class QuizQuestion:
     id: int
     question_text: str
     options: list[str]
+    time_limit_seconds: int | None = None
     question_started_at: datetime | None = None  # Track presentation time for analytics
     correct_option_index: int | None = None
     is_saved: bool = True

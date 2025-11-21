@@ -9,6 +9,7 @@ File format (repeat blocks separated by blank lines or '---'):
     C: Third option text
     D: Fourth option text
     CORRECT: A|B|C|D   (optional — omit if not graded yet)
+    TIMELIMIT: seconds (optional — omit for no timer)
 
 Example:
 
@@ -18,6 +19,7 @@ Example:
     C: 5
     D: 22
     CORRECT: B
+    TIMELIMIT: 30
 
 Architecture note:
     A structured format such as JSON/YAML would simplify parsing and allow
@@ -87,6 +89,7 @@ def _parse_block(block: str) -> QuizQuestion:
     question_lines: list[str] = []
     options: dict[str, str] = {}
     correct_letter: str | None = None
+    time_limit_seconds: int | None = None
     current_section: str | None = None
 
     for raw_line in block.splitlines():
@@ -102,6 +105,20 @@ def _parse_block(block: str) -> QuizQuestion:
 
         if upper.startswith("CORRECT:"):
             correct_letter = line.split(":", 1)[1].strip().upper()
+            current_section = None
+            continue
+
+        if upper.startswith("TIMELIMIT:"):
+            raw_value = line.split(":", 1)[1].strip()
+            if not raw_value:
+                raise QuizImportError("TIMELIMIT must include an integer value.")
+            try:
+                parsed_value = int(raw_value)
+            except ValueError as exc:  # pragma: no cover - conversion error details unnecessary
+                raise QuizImportError("TIMELIMIT must be an integer number of seconds.") from exc
+            if parsed_value <= 0:
+                raise QuizImportError("TIMELIMIT must be a positive integer.")
+            time_limit_seconds = parsed_value
             current_section = None
             continue
 
@@ -143,6 +160,7 @@ def _parse_block(block: str) -> QuizQuestion:
         id=0,  # overwritten by QuizManager when the quiz is loaded
         question_text=question_text,
         options=option_list,
+        time_limit_seconds=time_limit_seconds,
         correct_option_index=correct_index,
         is_saved=True,
     )

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+import math
 from enum import Enum, auto
 from pathlib import Path
 from typing import List
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QGridLayout,
@@ -19,8 +24,10 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QPlainTextEdit,
+    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -66,6 +73,11 @@ from quiz_app.constants.ui_constants import (
     QUIZ_SAVED_MESSAGE,
     STUDENT_URL_PLACEHOLDER,
     WINDOW_TITLE,
+)
+from quiz_app.constants.quiz_constants import (
+    DEFAULT_TIME_LIMIT_SECONDS,
+    TIME_LIMIT_TICKING_WINDOW_SECONDS,
+    TICKING_SOUND_PATH,
 )
 from quiz_app.core.models import QuizQuestion
 from quiz_app.core.quiz_exporter import save_quiz_to_file
@@ -125,12 +137,20 @@ class TeacherMainWindow(QMainWindow):
         self._reset_aliases_on_new_quiz: bool = False
         self._scoreboard_size: int = 3
         self._repeat_until_all_correct: bool = False
+        self._shuffle_seed: int | None = None
         self._last_export_path: Path | None = None
+        self._active_time_limit_seconds: int | None = None
+        self._active_time_limit_deadline: datetime | None = None
+        self._last_tick_second: int | None = None
+        self._ticking_sound_effect: QSoundEffect | None = None
 
         self._build_ui()
         self._configure_refresh_timer()
+        self._configure_time_limit_timer()
+        self._setup_ticking_sound()
         self._refresh_creation_preview()
         self._apply_font_sizes()
+        self.quiz_manager.set_shuffle_seed(self._shuffle_seed)
         self._auto_load_default_quiz()
 
     # ------------------------------------------------------------------
@@ -172,9 +192,13 @@ class TeacherMainWindow(QMainWindow):
         self.import_mode_button.clicked.connect(self._handle_import_quiz)  # type: ignore[arg-type]
         button_row.addWidget(self.import_mode_button)
 
-        self.edit_mode_button = QPushButton(MODE_BUTTON_EDIT, self)
-        self.edit_mode_button.clicked.connect(self._handle_edit_quiz)  # type: ignore[arg-type]
-        button_row.addWidget(self.edit_mode_button)
+        # NOTE: Remaining UI paths already keep Mode 1 active whenever a quiz is loaded,
+        # so the dedicated "Edit Quiz" button becomes redundant unless future flows
+        # introduce a separate draft state. We are commenting out the button for now,
+        # but keeping the handler around in case upcoming features need it again.
+        # self.edit_mode_button = QPushButton(MODE_BUTTON_EDIT, self)
+        # self.edit_mode_button.clicked.connect(self._handle_edit_quiz)  # type: ignore[arg-type]
+        # button_row.addWidget(self.edit_mode_button)
 
         self.start_mode_button = QPushButton(MODE_BUTTON_START, self)
         self.start_mode_button.setCheckable(True)
@@ -233,6 +257,22 @@ class TeacherMainWindow(QMainWindow):
             options_row.addWidget(option_input)
             self.creation_option_inputs.append(option_input)
         layout.addLayout(options_row)
+
+        time_limit_row = QHBoxLayout()
+        self.time_limit_checkbox = QCheckBox("Enable time limit for this question", self)
+        self.time_limit_checkbox.toggled.connect(self._handle_time_limit_toggle)  # type: ignore[arg-type]
+        time_limit_row.addWidget(self.time_limit_checkbox)
+
+        self.time_limit_spinbox = QSpinBox(self)
+        self.time_limit_spinbox.setRange(5, 3600)
+        self.time_limit_spinbox.setSingleStep(5)
+        self.time_limit_spinbox.setSuffix(" s")
+        self.time_limit_spinbox.setEnabled(False)
+        self.time_limit_spinbox.setValue(DEFAULT_TIME_LIMIT_SECONDS)
+        self.time_limit_spinbox.valueChanged.connect(lambda _: self._on_input_changed())  # type: ignore[arg-type]
+        time_limit_row.addWidget(self.time_limit_spinbox)
+
+        layout.addLayout(time_limit_row)
 
         selector_row = QHBoxLayout()
         selector_row.addWidget(QLabel("Correct option:", self))
@@ -312,6 +352,20 @@ class TeacherMainWindow(QMainWindow):
         
         layout.addLayout(button_row)
 
+        timer_row = QHBoxLayout()
+        self.time_limit_label = QLabel("", self)
+        self.time_limit_label.setVisible(False)
+        timer_row.addWidget(self.time_limit_label)
+
+        self.time_limit_progress = QProgressBar(self)
+        self.time_limit_progress.setRange(0, 1000)
+        self.time_limit_progress.setValue(0)
+        self.time_limit_progress.setTextVisible(False)
+        self.time_limit_progress.setVisible(False)
+        timer_row.addWidget(self.time_limit_progress, stretch=1)
+
+        layout.addLayout(timer_row)
+
         # Preview and scoreboard side by side
         preview_row = QHBoxLayout()
         self.live_preview_view = QWebEngineView(self)
@@ -356,6 +410,27 @@ class TeacherMainWindow(QMainWindow):
         self.refresh_timer.timeout.connect(self._refresh_state)  # type: ignore[arg-type]
         self.refresh_timer.start()
 
+    def _configure_time_limit_timer(self) -> None:
+        self.time_limit_timer = QTimer(self)
+        self.time_limit_timer.setInterval(100)
+        self.time_limit_timer.timeout.connect(self._tick_time_limit_indicator)  # type: ignore[arg-type]
+
+    def _setup_ticking_sound(self) -> None:
+        path_setting = TICKING_SOUND_PATH
+        if not path_setting:
+            return
+        sound_path = Path(path_setting)
+        if not sound_path.is_absolute():
+            project_root = Path(__file__).resolve().parents[2]
+            sound_path = project_root / sound_path
+        if not sound_path.exists():
+            return
+        effect = QSoundEffect(self)
+        effect.setSource(QUrl.fromLocalFile(str(sound_path)))
+        effect.setLoopCount(QSoundEffect.Infinite)
+        effect.setVolume(0.6)
+        self._ticking_sound_effect = effect
+
     def _refresh_state(self) -> None:
         if self._mode == TeacherMode.QUIZ_LIVE:
             # Only update stats - don't refresh the question preview to avoid flickering
@@ -376,7 +451,8 @@ class TeacherMainWindow(QMainWindow):
         disable_main_modes = live_mode or lobby_mode
         self.make_mode_button.setEnabled(not disable_main_modes)
         self.import_mode_button.setEnabled(not disable_main_modes)
-        self.edit_mode_button.setEnabled(not disable_main_modes)
+        # self.edit_mode_button.setEnabled(not disable_main_modes)
+        self.save_quiz_button.setEnabled(not disable_main_modes)
 
         # Map mode to stack index (0=creation, 1=lobby, 2=live)
         index_map = {
@@ -544,6 +620,13 @@ class TeacherMainWindow(QMainWindow):
         self._has_unsaved_changes = True
         self._refresh_creation_preview()
 
+    def _handle_time_limit_toggle(self, checked: bool) -> None:
+        if hasattr(self, "time_limit_spinbox"):
+            self.time_limit_spinbox.setEnabled(checked)
+            if checked and self.time_limit_spinbox.value() <= 0:
+                self.time_limit_spinbox.setValue(DEFAULT_TIME_LIMIT_SECONDS)
+        self._on_input_changed()
+
     def _handle_insert_new_draft(self) -> None:
         if not self._check_unsaved_changes():
             return
@@ -653,6 +736,10 @@ class TeacherMainWindow(QMainWindow):
         for input_field in self.creation_option_inputs:
             input_field.clear()
         self.correct_option_combo.setCurrentIndex(0)
+        if hasattr(self, "time_limit_checkbox"):
+            self.time_limit_checkbox.setChecked(False)
+        if hasattr(self, "time_limit_spinbox"):
+            self.time_limit_spinbox.setValue(DEFAULT_TIME_LIMIT_SECONDS)
         self._has_unsaved_changes = False
         self._refresh_creation_preview()
 
@@ -664,6 +751,16 @@ class TeacherMainWindow(QMainWindow):
             self.correct_option_combo.setCurrentIndex(question.correct_option_index + 1)
         else:
             self.correct_option_combo.setCurrentIndex(0)
+        if question.time_limit_seconds is not None:
+            if hasattr(self, "time_limit_spinbox"):
+                self.time_limit_spinbox.setValue(question.time_limit_seconds)
+            if hasattr(self, "time_limit_checkbox"):
+                self.time_limit_checkbox.setChecked(True)
+        else:
+            if hasattr(self, "time_limit_spinbox"):
+                self.time_limit_spinbox.setValue(DEFAULT_TIME_LIMIT_SECONDS)
+            if hasattr(self, "time_limit_checkbox"):
+                self.time_limit_checkbox.setChecked(False)
         self._has_unsaved_changes = False
         self._refresh_creation_preview()
 
@@ -673,10 +770,15 @@ class TeacherMainWindow(QMainWindow):
         correct_data = self.correct_option_combo.currentData()
         if correct_data is None:
             raise ValueError("Select the correct option before saving.")
+        time_limit = None
+        if hasattr(self, "time_limit_checkbox") and hasattr(self, "time_limit_spinbox"):
+            if self.time_limit_checkbox.isChecked():
+                time_limit = int(self.time_limit_spinbox.value())
         return QuizQuestion(
             id=0,
             question_text=question_text,
             options=options,
+            time_limit_seconds=time_limit,
             correct_option_index=int(correct_data),
             is_saved=True,
         )
@@ -815,6 +917,7 @@ class TeacherMainWindow(QMainWindow):
         self._aliases_reset_for_session = False
         self.live_toggle_button.setEnabled(False)
         self.live_correct_label.setVisible(False)
+        self._hide_time_limit_indicator()
         if hasattr(self, "answers_received_label"):
             self.answers_received_label.setText("Answers received: 0")
         self._set_mode(TeacherMode.QUIZ_CREATION)
@@ -824,9 +927,11 @@ class TeacherMainWindow(QMainWindow):
             return
         if self._live_action == LiveAction.SHOW_CORRECT:
             self.quiz_manager.stop_current_question()
+            self._hide_time_limit_indicator()
             question = self.quiz_manager.get_current_question()
-            if question and question.correct_option_index is not None:
-                letter = chr(ord("A") + question.correct_option_index)
+            correct_index = self.quiz_manager.get_current_display_correct_index()
+            if question and correct_index is not None:
+                letter = chr(ord("A") + correct_index)
                 self.live_correct_label.setText(f"Correct answer: {letter}")
             else:
                 self.live_correct_label.setText("Correct answer unavailable")
@@ -848,17 +953,106 @@ class TeacherMainWindow(QMainWindow):
 
     def _display_live_question(self, question: QuizQuestion) -> None:
         self._update_student_url_labels()
-        html = render_question_with_options(question.question_text, question.options, self._game_font_size)
+        options = self.quiz_manager.get_current_display_options()
+        html = render_question_with_options(question.question_text, options, self._game_font_size)
         self.live_preview_view.setHtml(html)
         self._update_live_stats()
         self._update_scoreboard_view()
+        self._configure_time_limit_indicator(question)
 
     def _update_live_question_preview(self) -> None:
         question = self.quiz_manager.get_current_question()
         if not question:
             return
-        html = render_question_with_options(question.question_text, question.options)
+        options = self.quiz_manager.get_current_display_options()
+        html = render_question_with_options(question.question_text, options)
         self.live_preview_view.setHtml(html)
+
+    def _configure_time_limit_indicator(self, question: QuizQuestion) -> None:
+        time_limit = question.time_limit_seconds
+        started_at = self.quiz_manager.get_current_question_start_time()
+        if time_limit is None or started_at is None:
+            self._hide_time_limit_indicator()
+            return
+        self._active_time_limit_seconds = time_limit
+        self._active_time_limit_deadline = started_at + timedelta(seconds=time_limit)
+        self._last_tick_second = None
+        self.time_limit_label.setVisible(True)
+        self.time_limit_progress.setVisible(True)
+        if not self.time_limit_timer.isActive():
+            self.time_limit_timer.start()
+        self._tick_time_limit_indicator()
+
+    def _tick_time_limit_indicator(self) -> None:
+        if (
+            self._active_time_limit_seconds is None
+            or self._active_time_limit_deadline is None
+            or not hasattr(self, "time_limit_progress")
+        ):
+            self._hide_time_limit_indicator()
+            return
+        total_seconds = self._active_time_limit_seconds
+        remaining = (self._active_time_limit_deadline - datetime.utcnow()).total_seconds()
+        if remaining <= 0:
+            remaining = 0
+            self.time_limit_timer.stop()
+        fraction = 0.0 if total_seconds <= 0 else max(0.0, min(1.0, remaining / total_seconds))
+        self.time_limit_progress.setValue(int(fraction * 1000))
+        if remaining > 0:
+            seconds_left = max(0, math.ceil(remaining))
+            self.time_limit_label.setText(f"{seconds_left}s remaining")
+            self._maybe_play_time_limit_tick(seconds_left)
+        else:
+            self.time_limit_label.setText("Time limit reached")
+            self._maybe_play_time_limit_tick(0)
+
+    def _hide_time_limit_indicator(self) -> None:
+        self._active_time_limit_seconds = None
+        self._active_time_limit_deadline = None
+        self._last_tick_second = None
+        self._stop_ticking_sound()
+        if hasattr(self, "time_limit_progress"):
+            self.time_limit_progress.setVisible(False)
+            self.time_limit_progress.setValue(0)
+        if hasattr(self, "time_limit_label"):
+            self.time_limit_label.setVisible(False)
+            self.time_limit_label.setText("")
+        if hasattr(self, "time_limit_timer") and self.time_limit_timer.isActive():
+            self.time_limit_timer.stop()
+
+    def _maybe_play_time_limit_tick(self, seconds_left: int) -> None:
+        if seconds_left < 0:
+            return
+        in_window = (
+            self._active_time_limit_seconds is not None
+            and seconds_left <= min(TIME_LIMIT_TICKING_WINDOW_SECONDS, self._active_time_limit_seconds)
+        )
+
+        if seconds_left == 0:
+            self._stop_ticking_sound()
+            if self._last_tick_second != seconds_left:
+                QApplication.beep()
+        elif in_window:
+            if self._ticking_sound_effect is not None:
+                self._start_ticking_sound()
+            elif self._last_tick_second != seconds_left:
+                QApplication.beep()
+        else:
+            self._stop_ticking_sound()
+
+        self._last_tick_second = seconds_left
+
+    def _start_ticking_sound(self) -> None:
+        if self._ticking_sound_effect is None:
+            return
+        if not self._ticking_sound_effect.isPlaying():
+            self._ticking_sound_effect.play()
+
+    def _stop_ticking_sound(self) -> None:
+        if self._ticking_sound_effect is None:
+            return
+        if self._ticking_sound_effect.isPlaying():
+            self._ticking_sound_effect.stop()
 
     def _update_live_stats(self) -> None:
         counts = self.quiz_manager.get_option_counts()
@@ -974,6 +1168,7 @@ class TeacherMainWindow(QMainWindow):
             self._reset_aliases_on_new_quiz,
             self._scoreboard_size,
             self._repeat_until_all_correct,
+            self._shuffle_seed,
         )
         if dialog.exec():
             self._ui_font_size = dialog.get_ui_font_size()
@@ -982,9 +1177,11 @@ class TeacherMainWindow(QMainWindow):
             self._reset_aliases_on_new_quiz = dialog.get_reset_aliases_on_start()
             self._scoreboard_size = dialog.get_scoreboard_size()
             self._repeat_until_all_correct = dialog.get_repeat_until_all_correct()
+            self._shuffle_seed = dialog.get_shuffle_seed()
             if not self._reset_aliases_on_new_quiz:
                 self._aliases_reset_for_session = False
             self.quiz_manager.set_repeat_until_all_correct(self._repeat_until_all_correct)
+            self.quiz_manager.set_shuffle_seed(self._shuffle_seed)
             self._apply_font_sizes()
             self._rebuild_scoreboard_labels()
             self._update_scoreboard_view()
@@ -1019,11 +1216,10 @@ class TeacherMainWindow(QMainWindow):
         """Apply font sizes to UI elements."""
         # Apply UI font size to buttons and controls
         ui_style = f"font-size: {self._ui_font_size}pt;"
-        for button in [
+        buttons = [
             self.make_mode_button,
             self.import_mode_button,
             self.save_quiz_button,
-            self.edit_mode_button,
             self.start_mode_button,
             self.lobby_start_button,
             self.about_button,
@@ -1033,7 +1229,10 @@ class TeacherMainWindow(QMainWindow):
             self.creation_delete_button,
             self.creation_prev_button,
             self.creation_next_button,
-        ]:
+        ]
+        if hasattr(self, "edit_mode_button"):
+            buttons.append(self.edit_mode_button)
+        for button in buttons:
             button.setStyleSheet(ui_style)
         
         # Apply game font size to live mode elements

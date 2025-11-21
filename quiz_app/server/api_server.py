@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timezone
 from threading import Thread
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -83,6 +84,11 @@ _STUDENT_PAGE_HTML = """<!doctype html>
       #status { min-height: 1.25rem; }
       .student-name { margin-top: 0.25rem; color: #94a3b8; font-size: 0.95rem; }
       .join-status { margin-top: 0.5rem; font-size: 0.95rem; color: #94a3b8; }
+      #timer-wrapper { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
+      #timer-wrapper.hidden { display: none; }
+      #timer-label { font-size: 0.95rem; color: #facc15; }
+      .timer-track { width: 100%; height: 0.6rem; background: rgba(250, 204, 21, 0.25); border-radius: 999px; overflow: hidden; }
+      #timer-fill { width: 100%; height: 100%; background: #facc15; transform-origin: left center; transform: scaleX(0); transition: transform 120ms linear; }
     </style>
     <script>
       window.MathJax = { tex: { inlineMath: [['$','$']], displayMath: [['$$','$$']] }, svg: { fontCache: 'global' } };
@@ -103,6 +109,12 @@ _STUDENT_PAGE_HTML = """<!doctype html>
     </section>
     <section class="card hidden" id="quiz-card">
       <div id="question-container">Waiting for the teacher to start the next question…</div>
+      <div id="timer-wrapper" class="hidden">
+        <span id="timer-label"></span>
+        <div class="timer-track">
+          <div id="timer-fill"></div>
+        </div>
+      </div>
       <div id="options-container" class="options-grid"></div>
       <p id="status"></p>
     </section>
@@ -117,6 +129,9 @@ _STUDENT_PAGE_HTML = """<!doctype html>
       const joinButton = document.getElementById('join-button');
       const joinStatus = document.getElementById('join-status');
       const waitingMessage = document.getElementById('waiting-message');
+      const timerWrapper = document.getElementById('timer-wrapper');
+      const timerLabel = document.getElementById('timer-label');
+      const timerFill = document.getElementById('timer-fill');
 
       let currentQuestionId = null;
       let hasAnswered = false;
@@ -127,6 +142,10 @@ _STUDENT_PAGE_HTML = """<!doctype html>
       let joinedLobbyGeneration = null;
       let aliasGeneration = null;
       let pollHandle = null;
+      let timerInterval = null;
+      let timerDeadlineMs = null;
+      let timerTotalMs = null;
+      let timeExpiredForQuestion = false;
 
       function setVisibility(element, isVisible) {
         if (!element) return;
@@ -134,6 +153,62 @@ _STUDENT_PAGE_HTML = """<!doctype html>
           element.classList.remove('hidden');
         } else {
           element.classList.add('hidden');
+        }
+      }
+
+      function stopTimer(hide = true) {
+        if (timerInterval) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+        }
+        timerDeadlineMs = null;
+        timerTotalMs = null;
+        if (hide) {
+          setVisibility(timerWrapper, false);
+        }
+        timerLabel.textContent = '';
+        timerFill.style.transform = 'scaleX(0)';
+      }
+
+      function updateTimerDisplay() {
+        if (!timerDeadlineMs || !timerTotalMs || !timerWrapper) {
+          return;
+        }
+        const remainingMs = Math.max(0, timerDeadlineMs - Date.now());
+        const fraction = timerTotalMs <= 0 ? 0 : Math.min(1, remainingMs / timerTotalMs);
+        timerFill.style.transform = `scaleX(${fraction})`;
+        if (remainingMs > 0) {
+          const secondsLeft = Math.max(0, Math.ceil(remainingMs / 1000));
+          timerLabel.textContent = `${secondsLeft}s remaining`;
+        } else {
+          timerLabel.textContent = 'Time limit reached';
+          timerFill.style.transform = 'scaleX(0)';
+          handleTimeExpired();
+          stopTimer(false);
+        }
+      }
+
+      function startTimer(deadlineMs, totalSeconds) {
+        timerTotalMs = Math.max(1, totalSeconds * 1000);
+        timerDeadlineMs = deadlineMs;
+        setVisibility(timerWrapper, true);
+        updateTimerDisplay();
+        if (timerInterval) {
+          clearInterval(timerInterval);
+        }
+        timerInterval = setInterval(updateTimerDisplay, 100);
+      }
+
+      function handleTimeExpired() {
+        if (timeExpiredForQuestion) {
+          return;
+        }
+        timeExpiredForQuestion = true;
+        const buttons = optionsContainer.querySelectorAll('.option-button');
+        buttons.forEach(btn => (btn.disabled = true));
+        if (!hasAnswered) {
+          statusEl.textContent = '⏱ Time is up – you can no longer submit an answer.';
+          statusEl.style.color = '#facc15';
         }
       }
 
@@ -202,7 +277,7 @@ _STUDENT_PAGE_HTML = """<!doctype html>
         optionsContainer.innerHTML = '';
         options.forEach((option, index) => {
           const button = buildOptionButton(option, index);
-          button.disabled = !active || hasAnswered;
+          button.disabled = !active || hasAnswered || timeExpiredForQuestion;
           optionsContainer.appendChild(button);
         });
       }
@@ -255,6 +330,8 @@ _STUDENT_PAGE_HTML = """<!doctype html>
             setVisibility(joinCard, true);
             setVisibility(waitingCard, false);
             setVisibility(quizCard, false);
+            stopTimer();
+            timeExpiredForQuestion = false;
             return;
           }
 
@@ -268,6 +345,8 @@ _STUDENT_PAGE_HTML = """<!doctype html>
             questionContainer.textContent = 'Waiting for the teacher to start the next question…';
             renderOptions([], false);
             statusEl.textContent = '';
+            stopTimer();
+            timeExpiredForQuestion = false;
             return;
           }
 
@@ -280,6 +359,8 @@ _STUDENT_PAGE_HTML = """<!doctype html>
               currentQuestionId = payload.question_id;
               hasAnswered = false; // Reset answer flag for new question
               myAnswer = null; // Reset stored answer
+              timeExpiredForQuestion = false;
+              stopTimer();
               // Display question HTML (or placeholder if empty)
               questionContainer.innerHTML = payload.question_html || '<p><em>(No question text)</em></p>';
               const options = Array.isArray(payload.options) ? payload.options : [];
@@ -289,9 +370,29 @@ _STUDENT_PAGE_HTML = """<!doctype html>
               // Typeset math with retry logic
               typesetMath();
             }
+            const timerEligible = (
+              typeof payload.time_limit_seconds === 'number' &&
+              payload.time_limit_seconds > 0 &&
+              payload.question_started_at
+            );
+            if (timerEligible) {
+              const startedMs = Date.parse(payload.question_started_at);
+              if (!Number.isNaN(startedMs)) {
+                startTimer(startedMs + payload.time_limit_seconds * 1000, payload.time_limit_seconds);
+              } else {
+                stopTimer();
+              }
+            } else {
+              stopTimer();
+              if (timeExpiredForQuestion) {
+                timeExpiredForQuestion = false;
+                renderOptions(Array.isArray(payload.options) ? payload.options : [], true);
+              }
+            }
           } else {
             setVisibility(waitingCard, true);
             waitingMessage.textContent = 'Waiting for the teacher to start the next question…';
+            stopTimer();
 
             if (payload.question_id === null) {
               setVisibility(quizCard, false);
@@ -300,6 +401,7 @@ _STUDENT_PAGE_HTML = """<!doctype html>
                 currentQuestionId = null;
                 hasAnswered = false;
                 myAnswer = null;
+                timeExpiredForQuestion = false;
               }
               questionContainer.textContent = 'Waiting for the teacher to start the next question…';
               renderOptions([], false);
@@ -334,6 +436,11 @@ _STUDENT_PAGE_HTML = """<!doctype html>
           statusEl.textContent = 'You have already answered this question!';
           return;
         }
+        if (timeExpiredForQuestion) {
+          statusEl.textContent = '⏱ Time is up – you can no longer submit an answer.';
+          statusEl.style.color = '#facc15';
+          return;
+        }
         
         try {
           const response = await fetch('/answer', {
@@ -354,6 +461,9 @@ _STUDENT_PAGE_HTML = """<!doctype html>
             const body = await response.json();
             statusEl.textContent = body.detail ?? 'Unable to send answer.';
             statusEl.style.color = '#f5f7ff';
+            if (body.detail && body.detail.toLowerCase().includes('time limit')) {
+              handleTimeExpired();
+            }
           }
         } catch (error) {
           statusEl.textContent = 'Unable to send answer.';
@@ -420,31 +530,43 @@ def create_api_app(quiz_manager: QuizManager) -> FastAPI:
         lobby_generation = manager.get_lobby_generation()
         quiz_started = manager.has_quiz_session_started()
         alias_generation = manager.get_alias_generation()
+        display_options = manager.get_current_display_options()
+        start_time = manager.get_current_question_start_time()
+        start_iso = None
+        if start_time is not None:
+          if start_time.tzinfo is None:
+            start_iso = start_time.replace(tzinfo=timezone.utc).isoformat()
+          else:
+            start_iso = start_time.astimezone(timezone.utc).isoformat()
         if question is None:
             return {
                 "active": False,
                 "question_id": None,
                 "question_html": None,
-                "options": [],
+            "options": display_options,
                 "correct_option_index": None,
                 "lobby_open": lobby_open,
                 "lobby_generation": lobby_generation,
                 "quiz_started": quiz_started,
                 "alias_generation": alias_generation,
+            "time_limit_seconds": None,
+            "question_started_at": start_iso,
             }
         fragment = renderer.render_fragment(question.question_text)
         # Only send correct answer when question is not active (teacher has shown answer)
-        correct_index = None if active else question.correct_option_index
+        correct_index = None if active else manager.get_current_display_correct_index()
         return {
             "active": active,
             "question_id": question.id,
             "question_html": fragment,
-            "options": question.options,
+          "options": display_options,
             "correct_option_index": correct_index,
             "lobby_open": lobby_open,
             "lobby_generation": lobby_generation,
             "quiz_started": quiz_started,
             "alias_generation": alias_generation,
+          "time_limit_seconds": question.time_limit_seconds,
+          "question_started_at": start_iso,
         }
 
     @app.post("/answer", status_code=201)

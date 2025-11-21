@@ -43,4 +43,7 @@ def _serialize_question(question: QuizQuestion) -> str:
         correct_letter = _OPTION_LETTERS[question.correct_option_index]
         lines.append(f"CORRECT: {correct_letter}")
 
+    if question.time_limit_seconds is not None:
+        lines.append(f"TIMELIMIT: {question.time_limit_seconds}")
+
     return "\n".join(lines)

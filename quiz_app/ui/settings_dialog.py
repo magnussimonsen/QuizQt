@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QGroupBox,
     QCheckBox,
+    QLineEdit,
 )
 
 
@@ -27,6 +28,7 @@ class SettingsDialog(QDialog):
         reset_aliases_on_start: bool = False,
         scoreboard_size: int = 3,
         repeat_until_all_correct: bool = False,
+        shuffle_seed: int | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
@@ -39,6 +41,7 @@ class SettingsDialog(QDialog):
         self._reset_aliases_on_start = reset_aliases_on_start
         self._scoreboard_size = max(1, min(10, scoreboard_size))
         self._repeat_until_all_correct = repeat_until_all_correct
+        self._shuffle_seed = shuffle_seed
         
         self._build_ui()
     
@@ -113,6 +116,18 @@ class SettingsDialog(QDialog):
         scoreboard_row.addStretch()
         scoreboard_row.addWidget(self.scoreboard_spinbox)
         display_layout.addLayout(scoreboard_row)
+
+        shuffle_seed_row = QHBoxLayout()
+        shuffle_seed_label = QLabel("Shuffle seed (optional):")
+        shuffle_seed_label.setToolTip("Enter a number for deterministic option shuffling. Leave blank for random order each time.")
+        self.shuffle_seed_input = QLineEdit()
+        self.shuffle_seed_input.setPlaceholderText("Random each time")
+        if self._shuffle_seed is not None:
+            self.shuffle_seed_input.setText(str(self._shuffle_seed))
+        shuffle_seed_row.addWidget(shuffle_seed_label)
+        shuffle_seed_row.addStretch()
+        shuffle_seed_row.addWidget(self.shuffle_seed_input)
+        display_layout.addLayout(shuffle_seed_row)
         
         layout.addWidget(display_group)
         
@@ -154,3 +169,13 @@ class SettingsDialog(QDialog):
     def get_repeat_until_all_correct(self) -> bool:
         """Get whether repeat-until-correct mode is enabled."""
         return self.repeat_until_all_correct_checkbox.isChecked()
+
+    def get_shuffle_seed(self) -> int | None:
+        """Get the optional shuffle seed provided by the user."""
+        text = self.shuffle_seed_input.text().strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            return None
