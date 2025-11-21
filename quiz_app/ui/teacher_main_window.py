@@ -981,6 +981,7 @@ class TeacherMainWindow(QMainWindow):
         self._active_time_limit_seconds = time_limit
         self._active_time_limit_deadline = started_at + timedelta(seconds=time_limit)
         self._last_tick_second = None
+        self._set_time_limit_label_emphasis(enabled=False)
         self.time_limit_label.setVisible(True)
         self.time_limit_progress.setVisible(True)
         if not self.time_limit_timer.isActive():
@@ -1015,6 +1016,7 @@ class TeacherMainWindow(QMainWindow):
         self._active_time_limit_deadline = None
         self._last_tick_second = None
         self._stop_ticking_sound()
+        self._set_time_limit_label_emphasis(enabled=False)
         if hasattr(self, "time_limit_progress"):
             self.time_limit_progress.setVisible(False)
             self.time_limit_progress.setValue(0)
@@ -1034,11 +1036,17 @@ class TeacherMainWindow(QMainWindow):
 
         if seconds_left == 0:
             self._stop_ticking_sound()
+            self._set_time_limit_label_emphasis(enabled=False)
         elif in_window:
             if self._ticking_sound_effect is not None:
                 self._start_ticking_sound()
+            self._set_time_limit_label_emphasis(
+                enabled=True,
+                blink_state=(seconds_left % 2 == 0),
+            )
         else:
             self._stop_ticking_sound()
+            self._set_time_limit_label_emphasis(enabled=False)
 
         self._last_tick_second = seconds_left
 
@@ -1053,6 +1061,18 @@ class TeacherMainWindow(QMainWindow):
             return
         if self._ticking_sound_effect.isPlaying():
             self._ticking_sound_effect.stop()
+
+    def _set_time_limit_label_emphasis(self, enabled: bool, blink_state: bool = False) -> None:
+        if not hasattr(self, "time_limit_label"):
+            return
+        base_style = f"padding: 2px 6px; border-radius: 4px; font-size: {self._game_font_size}pt;"
+        if not enabled:
+            self.time_limit_label.setStyleSheet(base_style)
+            return
+        background = "#b91c1c" if blink_state else "#ef4444"
+        self.time_limit_label.setStyleSheet(
+            base_style + f" color: #fff; background-color: {background};"
+        )
 
     def _update_live_stats(self) -> None:
         counts = self.quiz_manager.get_option_counts()
@@ -1236,9 +1256,10 @@ class TeacherMainWindow(QMainWindow):
             button.setStyleSheet(ui_style)
         
         # Apply game font size to live mode elements
-        self.live_network_label.setStyleSheet(
-            f"font-size: {self._game_font_size}pt; font-weight: bold;"
-        )
+        network_style = f"font-size: {self._game_font_size}pt; font-weight: bold;"
+        self.live_network_label.setStyleSheet(network_style)
+        if hasattr(self, "lobby_network_label"):
+            self.lobby_network_label.setStyleSheet(network_style)
         if hasattr(self, "lobby_participant_list"):
             self.lobby_participant_list.setStyleSheet(
                 f"font-size: {self._game_font_size}pt;"
@@ -1255,6 +1276,10 @@ class TeacherMainWindow(QMainWindow):
             )
         for label in getattr(self, "scoreboard_labels", []):
             label.setStyleSheet(game_label_style)
+        if hasattr(self, "scoreboard_group"):
+            self.scoreboard_group.setStyleSheet(
+                f"font-size: {self._game_font_size}pt; font-weight: bold;"
+            )
         
         # Apply to stats labels
         for label in self.option_stat_labels:
