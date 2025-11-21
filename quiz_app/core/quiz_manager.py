@@ -18,6 +18,7 @@ class ScoreEntry:
     display_name: str
     correct_answers: int = 0
     total_answers: int = 0
+    total_answer_time_ms: float = 0.0
     last_updated: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -28,6 +29,7 @@ class ScoreboardRow:
     display_name: str
     correct_answers: int
     total_answers: int
+    total_answer_time_ms: float
 
 
 class QuizManager:
@@ -51,6 +53,7 @@ class QuizManager:
         self._lobby_students: dict[str, JoinedStudent] = {}
         self._lobby_generation: int = 0
         self._quiz_session_active: bool = False
+        self._question_started_at: datetime | None = None
 
     def load_quiz_from_questions(self, questions: list[QuizQuestion]) -> None:
         """Replace the current quiz with a new ordered list of questions."""
@@ -72,6 +75,7 @@ class QuizManager:
             self._lobby_students.clear()
             self._lobby_generation = 0
             self._quiz_session_active = False
+            self._question_started_at = None
 
     def set_repeat_until_all_correct(self, enabled: bool) -> None:
         """Toggle repeat-mode behavior for question selection."""
@@ -106,6 +110,7 @@ class QuizManager:
             self._answers = []
             self._current_question_aliases.clear()
             self._quiz_session_active = True
+            self._question_started_at = datetime.utcnow()
             return question
 
     def move_to_next_question(self) -> QuizQuestion | None:
@@ -122,6 +127,7 @@ class QuizManager:
         """Stop accepting answers for the active question."""
         with self._lock:
             self._question_active = False
+            self._question_started_at = None
             if self._repeat_until_all_correct:
                 self._update_mastery_for_current_question()
 
@@ -150,11 +156,12 @@ class QuizManager:
                 display_name=display_name,
             )
             self._answers.append(submission)
+            elapsed_ms = self._compute_elapsed_answer_time(submission.submitted_at)
             if self._current_question.correct_option_index is not None:
                 is_correct = selected_option_index == self._current_question.correct_option_index
                 self._overall_answer_history.append(is_correct)
                 if display_name:
-                    self._update_scoreboard(display_name, is_correct)
+                    self._update_scoreboard(display_name, is_correct, elapsed_ms)
             return submission
 
     def get_current_question(self) -> QuizQuestion | None:
@@ -225,6 +232,7 @@ class QuizManager:
             self._current_question_aliases.clear()
             self._alias_generation = 0
             self._quiz_session_active = False
+            self._question_started_at = None
 
     def reset_quiz_progress(self) -> None:
         """Reset live progression so the next session starts from the first question."""
@@ -240,6 +248,7 @@ class QuizManager:
             self._lobby_students.clear()
             self._lobby_open = False
             self._quiz_session_active = False
+            self._question_started_at = None
         
     def begin_lobby_session(self) -> None:
         """Open the lobby so students can join the upcoming quiz."""
@@ -367,6 +376,7 @@ class QuizManager:
                 key=lambda entry: (
                     -entry.correct_answers,
                     entry.total_answers,
+                    entry.total_answer_time_ms,
                     entry.last_updated,
                 ),
             )
@@ -377,11 +387,12 @@ class QuizManager:
                         display_name=entry.display_name,
                         correct_answers=entry.correct_answers,
                         total_answers=entry.total_answers,
+                        total_answer_time_ms=entry.total_answer_time_ms,
                     )
                 )
             return snapshot
 
-    def _update_scoreboard(self, display_name: str, is_correct: bool) -> None:
+    def _update_scoreboard(self, display_name: str, is_correct: bool, elapsed_ms: float) -> None:
         entry = self._scoreboard.get(display_name)
         if entry is None:
             entry = ScoreEntry(display_name=display_name)
@@ -389,7 +400,14 @@ class QuizManager:
         entry.total_answers += 1
         if is_correct:
             entry.correct_answers += 1
+        entry.total_answer_time_ms += max(0.0, elapsed_ms)
         entry.last_updated = datetime.utcnow()
+
+    def _compute_elapsed_answer_time(self, submitted_at: datetime) -> float:
+        if self._question_started_at is None:
+            return 0.0
+        elapsed = submitted_at - self._question_started_at
+        return max(0.0, elapsed.total_seconds() * 1000.0)
 
     def _advance_linear_question(self) -> QuizQuestion | None:
         next_index = self._quiz_position + 1
@@ -401,6 +419,7 @@ class QuizManager:
         self._answers = []
         self._current_question_aliases.clear()
         self._quiz_session_active = True
+        self._question_started_at = datetime.utcnow()
         return self._current_question
 
     def _select_unmastered_question(self) -> QuizQuestion | None:
@@ -416,6 +435,7 @@ class QuizManager:
         self._answers = []
         self._current_question_aliases.clear()
         self._quiz_session_active = True
+        self._question_started_at = datetime.utcnow()
         return self._current_question
 
     def _update_mastery_for_current_question(self) -> None:

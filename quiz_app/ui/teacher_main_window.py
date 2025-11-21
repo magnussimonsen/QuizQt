@@ -115,6 +115,7 @@ class TeacherMainWindow(QMainWindow):
         self._live_session_active = False
         self._live_action = LiveAction.SHOW_CORRECT
         self._lobby_session_open = False
+        self._aliases_reset_for_session = False
         self._lobby_snapshot_ids: list[str] = []
         
         # Font size settings
@@ -463,6 +464,7 @@ class TeacherMainWindow(QMainWindow):
             self.start_mode_button.setChecked(False)
             return
 
+        self._ensure_alias_reset_for_session()
         self.quiz_manager.begin_lobby_session()
         self._lobby_session_open = True
         self.start_mode_button.setText(MODE_BUTTON_START)
@@ -476,12 +478,23 @@ class TeacherMainWindow(QMainWindow):
         self._set_mode(TeacherMode.QUIZ_LOBBY)
         self._refresh_lobby_participants()
 
+    def _ensure_alias_reset_for_session(self) -> None:
+        if not self._reset_aliases_on_new_quiz:
+            self._aliases_reset_for_session = False
+            return
+        if self._aliases_reset_for_session:
+            return
+        self.quiz_manager.reset_student_aliases()
+        self._update_scoreboard_view()
+        self._aliases_reset_for_session = True
+
     def _cancel_lobby_session(self) -> None:
         self.quiz_manager.cancel_lobby_session()
         self._lobby_session_open = False
         self.start_mode_button.setText(MODE_BUTTON_START)
         self.start_mode_button.setChecked(False)
         self.start_mode_button.setEnabled(True)
+        self._aliases_reset_for_session = False
         self._lobby_snapshot_ids = []
         if hasattr(self, "lobby_participant_list"):
             self.lobby_participant_list.clear()
@@ -769,9 +782,7 @@ class TeacherMainWindow(QMainWindow):
             self._set_mode(TeacherMode.QUIZ_CREATION)
             return False
 
-        if self._reset_aliases_on_new_quiz:
-            self.quiz_manager.reset_student_aliases()
-            self._update_scoreboard_view()
+        self._ensure_alias_reset_for_session()
 
         self.quiz_manager.reset_quiz_progress()
         question = self.quiz_manager.move_to_next_question()
@@ -779,6 +790,7 @@ class TeacherMainWindow(QMainWindow):
             show_info(self, "Quiz complete", QUIZ_COMPLETE_MESSAGE)
             self.start_mode_button.setChecked(False)
             self._set_mode(TeacherMode.QUIZ_CREATION)
+            self._aliases_reset_for_session = False
             return False
 
         self._live_session_active = True
@@ -800,6 +812,7 @@ class TeacherMainWindow(QMainWindow):
         self.start_mode_button.setText(MODE_BUTTON_START)
         self.start_mode_button.setChecked(False)
         self.start_mode_button.setEnabled(True)
+        self._aliases_reset_for_session = False
         self.live_toggle_button.setEnabled(False)
         self.live_correct_label.setVisible(False)
         if hasattr(self, "answers_received_label"):
@@ -969,6 +982,8 @@ class TeacherMainWindow(QMainWindow):
             self._reset_aliases_on_new_quiz = dialog.get_reset_aliases_on_start()
             self._scoreboard_size = dialog.get_scoreboard_size()
             self._repeat_until_all_correct = dialog.get_repeat_until_all_correct()
+            if not self._reset_aliases_on_new_quiz:
+                self._aliases_reset_for_session = False
             self.quiz_manager.set_repeat_until_all_correct(self._repeat_until_all_correct)
             self._apply_font_sizes()
             self._rebuild_scoreboard_labels()
