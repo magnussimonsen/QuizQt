@@ -355,6 +355,7 @@ class TeacherMainWindow(QMainWindow):
         timer_row = QHBoxLayout()
         self.time_limit_label = QLabel("", self)
         self.time_limit_label.setVisible(False)
+        self.time_limit_label.setStyleSheet("padding: 2px 6px; border-radius: 4px;")
         timer_row.addWidget(self.time_limit_label)
 
         self.time_limit_progress = QProgressBar(self)
@@ -427,7 +428,10 @@ class TeacherMainWindow(QMainWindow):
             return
         effect = QSoundEffect(self)
         effect.setSource(QUrl.fromLocalFile(str(sound_path)))
-        effect.setLoopCount(QSoundEffect.Infinite)
+        loop_value = getattr(QSoundEffect, "Infinite", -1)
+        if hasattr(loop_value, "value"):
+            loop_value = loop_value.value
+        effect.setLoopCount(int(loop_value))
         effect.setVolume(0.6)
         self._ticking_sound_effect = effect
 
@@ -1030,13 +1034,9 @@ class TeacherMainWindow(QMainWindow):
 
         if seconds_left == 0:
             self._stop_ticking_sound()
-            if self._last_tick_second != seconds_left:
-                QApplication.beep()
         elif in_window:
             if self._ticking_sound_effect is not None:
                 self._start_ticking_sound()
-            elif self._last_tick_second != seconds_left:
-                QApplication.beep()
         else:
             self._stop_ticking_sound()
 
@@ -1239,10 +1239,22 @@ class TeacherMainWindow(QMainWindow):
         self.live_network_label.setStyleSheet(
             f"font-size: {self._game_font_size}pt; font-weight: bold;"
         )
+        if hasattr(self, "lobby_participant_list"):
+            self.lobby_participant_list.setStyleSheet(
+                f"font-size: {self._game_font_size}pt;"
+            )
         
         game_label_style = f"font-size: {self._game_font_size}pt;"
         self.live_correct_label.setStyleSheet(game_label_style)
         self.live_toggle_button.setStyleSheet(game_label_style)
+        if hasattr(self, "time_limit_label"):
+            self.time_limit_label.setStyleSheet(game_label_style)
+        if hasattr(self, "time_limit_progress"):
+            self.time_limit_progress.setStyleSheet(
+                f"QProgressBar {{ font-size: {self._game_font_size}pt; }}"
+            )
+        for label in getattr(self, "scoreboard_labels", []):
+            label.setStyleSheet(game_label_style)
         
         # Apply to stats labels
         for label in self.option_stat_labels:
