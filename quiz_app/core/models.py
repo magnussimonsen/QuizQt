@@ -27,6 +27,8 @@ class SubmittedAnswer:
     question_id: int
     selected_option_index: int
     submitted_at: datetime
+    is_correct: bool
+    student_id: str  # This was display_name in some contexts, but let's be explicit.
     display_name: str | None = None
 
 
