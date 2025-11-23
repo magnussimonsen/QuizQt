@@ -16,6 +16,15 @@ python app_main.py
 ```
 The Qt app launches and hosts the student page at `http://<teacher-ip>:8000/`.
 
+## Building (Linux)
+PyInstaller packaging has only been tested on Linux so far. From the repo root:
+
+```bash
+bash build/build_quizqt.sh
+```
+
+The helper script installs PyInstaller into the active virtual environment if needed and produces the bundle in `build/dist/QuizQt/`. Launch the resulting `build/dist/QuizQt/QuizQt` binary to run the packaged desktop app.
+
 ## Quiz text format
 Each question block in `quiz_questions.txt` looks like:
 ```
