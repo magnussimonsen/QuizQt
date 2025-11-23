@@ -8,6 +8,5 @@ __pycache__/
 
 # Build artifacts
 build/
-!build/QuizQt.spec
-!build/build_quizqt.sh
 dist/
+quiz_app/dist/

@@ -61,12 +61,12 @@ try {
         throw 'PyInstaller build failed.'
     }
 
-    $outputPath = Join-Path $scriptDir 'dist/QuizQt/QuizQt.exe'
+    $outputPath = Join-Path $scriptDir 'dist/QuizQt.exe'
     if (Test-Path $outputPath) {
         Write-Host "Build complete: $outputPath"
     }
     else {
-        throw 'Build finished, but dist/QuizQt/QuizQt.exe was not found.'
+        throw 'Build finished, but dist/QuizQt.exe was not found.'
     }
 }
 finally {

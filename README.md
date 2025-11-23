@@ -20,10 +20,10 @@ The Qt app launches and hosts the student page at `http://<teacher-ip>:8000/`.
 PyInstaller packaging on Linux: from the repo root run
 
 ```bash
-bash build/build_quizqt.sh
+bash quiz_app/build_quizqt.sh
 ```
 
-The helper script installs PyInstaller into the active virtual environment if needed and produces the bundle in `build/dist/QuizQt/`. Launch the resulting `build/dist/QuizQt/QuizQt` binary to run the packaged desktop app.
+The helper script installs PyInstaller into the active virtual environment if needed and now produces a single-file bundle in `quiz_app/dist/QuizQt` (or `QuizQt.exe` on Windows Subsystem for Linux); launch that binary to run the packaged desktop app.
 
 ## Building (Windows)
 Use PowerShell (pwsh or Windows PowerShell) from the repo root:
@@ -38,7 +38,7 @@ Prefer Cmd instead? Run:
 quiz_app\build_quizqt.bat
 ```
 
-Both scripts look for `.venv\\Scripts\\python.exe` first (falling back to `py`/`python` on your PATH), install PyInstaller if it is missing, and write the packaged app to `quiz_app/dist/QuizQt/QuizQt.exe`.
+Both scripts look for `.venv\\Scripts\\python.exe` first (falling back to `py`/`python` on your PATH), install PyInstaller if it is missing, and now emit a single-file build at `quiz_app/dist/QuizQt.exe`. Zip that file before uploading a release.
 
 ## Quiz text format
 Each question block in `quiz_questions.txt` looks like:

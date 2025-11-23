@@ -20,12 +20,12 @@ if ! "$PYTHON_CMD" -m pip show pyinstaller >/dev/null 2>&1; then
 fi
 
 echo "Building executable with PyInstaller (QuizQt.spec)..."
-# Build command: python3 -m PyInstaller QuizQt.spec (run via venv if available)
-"$PYTHON_CMD" -m PyInstaller QuizQt.spec
+# Build command: python3 -m PyInstaller --onefile QuizQt.spec (run via venv if available)
+"$PYTHON_CMD" -m PyInstaller --onefile QuizQt.spec
 
-if [ -f "dist/QuizQt/QuizQt" ]; then
-	echo "Build complete: dist/QuizQt/QuizQt"
+if [ -f "dist/QuizQt" ] || [ -f "dist/QuizQt.exe" ]; then
+	echo "Build complete: dist/QuizQt$( [ -f "dist/QuizQt.exe" ] && printf ".exe" )"
 else
-	echo "ERROR: Build did not produce dist/QuizQt/QuizQt"
+	echo "ERROR: Build did not produce dist/QuizQt or dist/QuizQt.exe"
 	exit 1
 fi

@@ -35,11 +35,11 @@ if errorlevel 1 (
 echo Building executable with PyInstaller (QuizQt.spec)...
 "%PYTHON_CMD%" -m PyInstaller QuizQt.spec || goto :error
 
-if exist dist\QuizQt\QuizQt.exe (
-    echo Build complete: dist\QuizQt\QuizQt.exe
+if exist dist\QuizQt.exe (
+    echo Build complete: dist\QuizQt.exe
     goto :success
 ) else (
-    echo ERROR: Build finished, but dist\QuizQt\QuizQt.exe was not created.
+    echo ERROR: Build finished, but dist\QuizQt.exe was not created.
     goto :error
 )
 
