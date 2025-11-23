@@ -389,7 +389,12 @@ class TeacherMainWindow(QMainWindow):
         show_info(self, f"About {APP_NAME}", details)
 
     def _handle_help(self) -> None:
-        show_info(self, "QuizQt Help", HELP_TEXT)
+        show_info(
+            self,
+            "QuizQt Help",
+            HELP_TEXT,
+            font_point_size=self._ui_font_size,
+        )
     def _handle_settings(self) -> None:
         dialog = SettingsDialog(
             self,
@@ -426,6 +431,7 @@ class TeacherMainWindow(QMainWindow):
             self.save_quiz_button,
             self.start_mode_button,
             self.about_button,
+            self.help_button,
             self.settings_button,
         ]
         for button in buttons:

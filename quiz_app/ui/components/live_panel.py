@@ -309,7 +309,7 @@ class LivePanel(QWidget):
         self.scoreboard_layout.addWidget(self.answers_received_label)
 
         self.scoreboard_layout.addStretch()
-        self.scoreboard_group.setTitle(f"Top {self._scoreboard_size}")
+        # self.scoreboard_group.setTitle(f"Top {self._scoreboard_size}") Does not render well
         self.apply_font_size(self._game_font_size)
 
     def _update_scoreboard_view(self) -> None:

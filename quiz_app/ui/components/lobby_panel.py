@@ -86,7 +86,7 @@ class LobbyPanel(QWidget):
         self.participant_list.clear()
         for student in students:
             timestamp = student.joined_at.strftime("%H:%M:%S")
-            QListWidgetItem(f"{student.display_name} — Ready at {timestamp}", self.participant_list)
+            QListWidgetItem(f"{student.display_name} joined at {timestamp}.", self.participant_list)
         count = len(students)
         self.ready_label.setText(MODE4_READY_COUNT_TEMPLATE.format(count=count))
         self.empty_label.setVisible(count == 0)

@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QMessageBox, QWidget
+
+
+def _apply_optional_font(widget: QWidget, font_point_size: int | None) -> None:
+    """Apply font size to a widget when requested."""
+    if font_point_size is None or font_point_size <= 0:
+        return
+
+    font: QFont = widget.font()
+    font.setPointSize(font_point_size)
+    widget.setFont(font)
 
 
 def confirm_delete_question(parent: QWidget, question_number: int) -> bool:
@@ -99,7 +110,13 @@ def show_error(parent: QWidget, title: str, message: str) -> None:
     QMessageBox.critical(parent, title, message)
 
 
-def show_info(parent: QWidget, title: str, message: str) -> None:
+def show_info(
+    parent: QWidget,
+    title: str,
+    message: str,
+    *,
+    font_point_size: int | None = None,
+) -> None:
     """Show information dialog.
     
     Args:
@@ -107,7 +124,18 @@ def show_info(parent: QWidget, title: str, message: str) -> None:
         title: Dialog title
         message: Information message
     """
-    QMessageBox.information(parent, title, message)
+    msg_box = QMessageBox(parent)
+    msg_box.setIcon(QMessageBox.Information)
+    msg_box.setWindowTitle(title)
+    msg_box.setText(message)
+    msg_box.setStandardButtons(QMessageBox.Ok)
+    _apply_optional_font(msg_box, font_point_size)
+    if font_point_size is not None and font_point_size > 0:
+        msg_box.setStyleSheet(
+            f"QLabel {{ font-size: {font_point_size}pt; }}\n"
+            f"QPushButton {{ font-size: {font_point_size}pt; }}"
+        )
+    msg_box.exec()
 
 
 def show_warning(parent: QWidget, title: str, message: str) -> None:
