@@ -46,7 +46,6 @@ class GameSession:
         self._question_started_at = None
         self._answers = []
         self._current_question_aliases.clear()
-        self._alias_generation += 1
         self._current_shuffled_options = []
         self._shuffled_correct_option_index = None
         self._current_option_order = None
@@ -57,7 +56,6 @@ class GameSession:
         self._question_started_at = datetime.utcnow()
         self._answers = []
         self._current_question_aliases.clear()
-        self._alias_generation += 1
         self._shuffle_options(question)
 
     def stop_question(self) -> None:
@@ -148,6 +146,10 @@ class GameSession:
 
     def get_alias_generation(self) -> int:
         return self._alias_generation
+
+    def advance_alias_generation(self) -> None:
+        self._alias_generation += 1
+        self._current_question_aliases.clear()
 
     def register_alias(self, alias: str) -> None:
         self._current_question_aliases.add(alias)

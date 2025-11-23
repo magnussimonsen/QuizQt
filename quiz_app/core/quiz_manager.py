@@ -104,11 +104,14 @@ class QuizManager:
             students = self._lobby.finalize_students()
             display_names = {s.display_name for s in students}
             self._scoreboard.initialize_students(display_names)
-            self._session.start_session()
 
     def get_lobby_generation(self) -> int:
         with self._lock:
             return self._lobby.get_generation()
+
+    def has_quiz_session_started(self) -> bool:
+        with self._lock:
+            return self._session.is_active()
 
     # --- Game Session Delegation ---
 
@@ -163,7 +166,7 @@ class QuizManager:
         with self._lock:
             return self._session.get_question_start_time()
 
-    def submit_answer(self, student_name: str, option_index: int) -> bool:
+    def submit_answer(self, student_name: str, option_index: int) -> SubmittedAnswer:
         with self._lock:
             # Check if student is in session
             if student_name not in self._lobby.get_session_students():
@@ -173,21 +176,25 @@ class QuizManager:
                 pass
 
             is_new = self._session.record_answer(student_name, option_index)
+            
+            # Retrieve the submitted answer object
+            answers = self._session.get_answers()
+            # Find the answer for this student (it must exist now)
+            submitted = next((a for a in answers if a.student_id == student_name), None)
+            if not submitted:
+                 raise RuntimeError("Answer recorded but not found.")
+
             if is_new:
                 # Update scoreboard
                 # We need to know if it was correct and the time taken
-                answers = self._session.get_answers()
-                # The last one is the one we just added
-                latest = answers[-1]
-                
                 start_time = self._session.get_question_start_time()
                 time_ms = 0.0
                 if start_time:
-                    time_ms = (latest.submitted_at - start_time).total_seconds() * 1000
+                    time_ms = (submitted.submitted_at - start_time).total_seconds() * 1000
                 
-                self._scoreboard.record_answer(student_name, latest.is_correct, time_ms)
+                self._scoreboard.record_answer(student_name, submitted.is_correct, time_ms)
             
-            return is_new
+            return submitted
 
     def get_answers_for_current_question(self) -> list[SubmittedAnswer]:
         with self._lock:
@@ -250,9 +257,13 @@ class QuizManager:
 
     # --- Alias Management (Legacy/Session) ---
 
-    def get_student_alias_generation(self) -> int:
+    def get_alias_generation(self) -> int:
         with self._lock:
             return self._session.get_alias_generation()
+
+    # Backwards-compat helper for any legacy callers
+    def get_student_alias_generation(self) -> int:  # pragma: no cover - legacy alias
+        return self.get_alias_generation()
 
     def register_student_alias(self, alias: str) -> None:
         with self._lock:
@@ -263,15 +274,5 @@ class QuizManager:
             return self._session.has_alias(alias)
     
     def reset_student_aliases(self) -> None:
-        # This was used to clear aliases between games.
-        # In new design, aliases are per-question or per-session?
-        # Original: _current_question_aliases cleared on new question.
-        # But there was also a global reset?
-        # "reset_student_aliases" in original code cleared _current_question_aliases.
-        # It seems aliases are used to prevent duplicate names in a single question?
-        # Or maybe for the lobby?
-        # Actually, looking at original code, `_current_question_aliases` was cleared on `load_quiz_from_questions` and `reset_quiz`.
-        # And `reset_student_aliases` method just cleared it.
         with self._lock:
-            # This seems to be a no-op if aliases are per-question and cleared on start_question.
-            pass
+            self._session.advance_alias_generation()

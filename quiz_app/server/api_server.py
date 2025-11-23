@@ -526,7 +526,7 @@ def create_api_app(quiz_manager: QuizManager) -> FastAPI:
     def get_question(manager: QuizManager = Depends(quiz_manager_dep)) -> dict[str, object]:
         question = manager.get_current_question()
         active = manager.is_question_active()
-        lobby_open = manager.lobby_is_open()
+        lobby_open = manager.is_lobby_open()
         lobby_generation = manager.get_lobby_generation()
         quiz_started = manager.has_quiz_session_started()
         alias_generation = manager.get_alias_generation()
@@ -578,9 +578,9 @@ def create_api_app(quiz_manager: QuizManager) -> FastAPI:
     ) -> dict[str, object]:
         alias = _ensure_alias(request, response, manager, name_assigner)
         try:
-            submission = manager.record_selected_option(
-                payload.selected_option_index,
-                display_name=alias,
+            submission = manager.submit_answer(
+                student_name=alias,
+                option_index=payload.selected_option_index,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -606,7 +606,7 @@ def create_api_app(quiz_manager: QuizManager) -> FastAPI:
             if stripped:
                 chosen_name = stripped
         try:
-            joined = manager.register_lobby_student(chosen_name)
+            joined = manager.join_lobby(chosen_name)
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {
