@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import math
 from pathlib import Path
+import sys
 
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtMultimedia import QSoundEffect
@@ -153,19 +154,14 @@ class LivePanel(QWidget):
             return
         sound_path = Path(path_setting)
         if not sound_path.is_absolute():
-            # Assuming project root is 3 levels up from here (quiz_app/ui/components/live_panel.py -> quiz_app/ui/components -> quiz_app/ui -> quiz_app -> root)
-            # Wait, the original code was in quiz_app/ui/teacher_main_window.py (2 levels up from quiz_app).
-            # Here we are in quiz_app/ui/components/live_panel.py.
-            # __file__ -> components -> ui -> quiz_app -> root. So 4 parents?
-            # Let's be safe and use a relative path from the module location if possible, or just assume CWD if running from root.
-            # The original code used: Path(__file__).resolve().parents[2]
-            # If I am at quiz_app/ui/components/live_panel.py:
-            # parent 0: components
-            # parent 1: ui
-            # parent 2: quiz_app
-            # parent 3: root (where app_main.py likely is)
-            project_root = Path(__file__).resolve().parents[3]
-            sound_path = project_root / sound_path
+            base_path = Path(
+                getattr(
+                    sys,
+                    "_MEIPASS",
+                    Path(__file__).resolve().parents[3],
+                )
+            )
+            sound_path = base_path / sound_path
         if not sound_path.exists():
             return
         effect = QSoundEffect(self)

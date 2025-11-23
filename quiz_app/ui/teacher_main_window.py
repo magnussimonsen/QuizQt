@@ -19,6 +19,7 @@ from quiz_app.constants.about import (
     APP_ABOUT_TEXT,
     APP_AUTHOR,
     APP_AI,
+    HELP_TEXT,
     APP_LICENSE,
     APP_NAME,
     APP_REPOSITORY_URL,
@@ -153,6 +154,10 @@ class TeacherMainWindow(QMainWindow):
         self.about_button = QPushButton("About QuizQt", self)
         self.about_button.clicked.connect(self._handle_about)
         button_row.addWidget(self.about_button)
+
+        self.help_button = QPushButton("Help", self)
+        self.help_button.clicked.connect(self._handle_help)
+        button_row.addWidget(self.help_button)
 
         self.settings_button = QPushButton("Settings", self)
         self.settings_button.clicked.connect(self._handle_settings)
@@ -383,6 +388,8 @@ class TeacherMainWindow(QMainWindow):
         )
         show_info(self, f"About {APP_NAME}", details)
 
+    def _handle_help(self) -> None:
+        show_info(self, "QuizQt Help", HELP_TEXT)
     def _handle_settings(self) -> None:
         dialog = SettingsDialog(
             self,
