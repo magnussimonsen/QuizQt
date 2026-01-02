@@ -1,12 +1,37 @@
 # Virtual environments
 .venv/
 venv/
+.env
+.env.*
+*.env
 
 # Python cache
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+pip-wheel-metadata/
 
 # Build artifacts
 build/
 dist/
 quiz_app/dist/
+
+# Coverage reports
+.coverage*
+htmlcov/
+coverage.xml
+
+# Logs and local databases
+*.log
+*.sqlite3
+
+# Editor/IDE settings
+.vscode/
+.idea/
+*.iml
+
+# OS artifacts
+.DS_Store
+Thumbs.db
